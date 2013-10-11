@@ -1,0 +1,837 @@
+using System;
+using UnityEngine;
+using KSP.IO;
+
+ /******************************************************************************
+ * Copyright (c) 2013, Justin Bengtson
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met: 
+ * 
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
+ * 
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ * this list of conditions and the following disclaimer in the documentation
+ * and/or other materials provided with the distribution.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ ******************************************************************************/
+
+namespace RegexKSP {
+	[KSPAddon(KSPAddon.Startup.Flight, false)]
+
+	public class PreciseNode : MonoBehaviour {
+		private bool configLoaded = false;
+		private bool showOptions = false;
+		private bool conicsLoaded = false;
+		private Rect mainWindowPos = new Rect(Screen.width / 10, 20, 250, 130);
+		private Rect optionsWindowPos = new Rect(Screen.width / 3, 20, 250, 130);
+		private ManeuverNode node = null;
+		private double lastUT = 0;
+		private double increment = 1.0;
+		public PluginConfiguration config;
+
+        // options system
+        private bool waitForKey = false;
+        private byte currentWaitKey = 255;
+        private double keyWaitTime = 0.0;
+        private enum KEYS : byte {PROGINC, PROGDEC, NORMINC, NORMDEC, RADIINC, RADIDEC, TIMEINC, TIMEDEC, PAGEINC, PAGECON};
+
+		// default keymappings in case we have no config file ready.
+		private int conicsMode = 3;
+		private KeyCode progInc = KeyCode.Keypad8;
+		private KeyCode progDec = KeyCode.Keypad5;
+		private KeyCode normInc = KeyCode.Keypad9;
+		private KeyCode normDec = KeyCode.Keypad7;
+		private KeyCode radiInc = KeyCode.Keypad6;
+		private KeyCode radiDec = KeyCode.Keypad4;
+		private KeyCode timeInc = KeyCode.Keypad3;
+		private KeyCode timeDec = KeyCode.Keypad1;
+		private KeyCode pageIncrement = KeyCode.Keypad0;
+		private KeyCode pageConics = KeyCode.KeypadEnter;
+
+        /// <summary>
+        /// Overridden function from MonoBehavior
+        /// </summary>
+		public void Awake() {
+			CancelInvoke();
+			loadConfig();
+		}
+
+        /// <summary>
+        /// Overridden function from MonoBehavior
+        /// </summary>
+        public void OnDisable() {
+			saveConfig();
+        }
+
+        /// <summary>
+        /// Overridden function from MonoBehavior
+        /// </summary>
+		public void Update() {
+			PatchedConicSolver solver = FlightGlobals.ActiveVessel.patchedConicSolver;
+			if(solver.maneuverNodes.Count > 0) {
+				if(node == null || !solver.maneuverNodes.Contains(node)) {
+					// get the first one if we can't find the current or it's null
+					node = solver.maneuverNodes[0];
+				}
+				lastUT = node.UT;
+			} else {
+				node = null;
+				lastUT = 0;
+			}
+			if(canShow) {
+				processKeyInput();
+			}
+		}
+		
+        /// <summary>
+        /// Overridden function from MonoBehavior
+        /// </summary>
+		public void OnGUI() {
+			if(canShow) {
+				if(!conicsLoaded) {
+					setConicsMode(conicsMode);
+					conicsLoaded = true;
+				}
+				drawGUI();
+			}
+		}
+
+        /// <summary>
+        /// Overridden function from MonoBehavior.
+        /// </summary>
+		public void drawGUI() {
+			GUI.skin = null;
+			mainWindowPos = GUILayout.Window(21349, mainWindowPos, drawMainWindow, "Precise Node", GUILayout.ExpandHeight(true));
+            if(showOptions) {
+    			optionsWindowPos = GUILayout.Window(21350, optionsWindowPos, drawOptionsWindow, "Precise Node Options", GUILayout.ExpandHeight(true));
+            }
+		}
+		
+        /// <summary>
+        /// Draws the GUI window.
+        /// </summary>
+        /// <param name="id">Identifier.</param>
+		public void drawMainWindow(int id) {
+			Color defaultColor = GUI.backgroundColor;
+			double convertedTime = 0;
+			bool changed = false;
+			PatchedConicSolver solver = getSolver();
+
+			String timeHuman = convertUTtoHumanTime(lastUT);
+			String timeUT = lastUT.ToString("0.##");
+			String prograde = node.DeltaV.z.ToString("0.##") + "m/s";
+			String normal = node.DeltaV.y.ToString("0.##") + "m/s";
+			String radial = node.DeltaV.x.ToString("0.##") + "m/s";
+			String eangle = "n/a";
+			if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
+				eangle = getEjectionAngle(node.UT).ToString("0.##") + "°";
+			}
+
+            // Options button
+			if(GUI.Button(new Rect(mainWindowPos.width - 20, 2, 18, 18), "=")) {
+                showOptions = true;
+            }
+
+			GUILayout.BeginVertical();
+
+            // Maneuver node paging controls
+			GUILayout.BeginHorizontal();
+			if(GUILayout.Button("<")) {
+				int count = solver.maneuverNodes.Count;
+				if(count > 1) {
+					if(node == null) {
+						// get the first node.
+						node = solver.maneuverNodes[0];
+						lastUT = node.UT;
+					} else {
+						// get the previous or last node
+						int idx = solver.maneuverNodes.IndexOf(node);
+						if(idx == 0) {
+							node = solver.maneuverNodes[--count];
+						} else {
+							node = solver.maneuverNodes[--idx];
+						}
+						lastUT = node.UT;
+						return;
+					}
+				} else {
+					return;
+				}
+			}
+			GUILayout.Label("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1), GUILayout.Width(100));
+			if(GUILayout.Button(">")) {
+				int count = solver.maneuverNodes.Count;
+				if(count > 1) {
+					if(node == null) {
+						// get the first node.
+						node = solver.maneuverNodes[0];
+						lastUT = node.UT;
+					} else {
+						// get the previous or last node
+						int idx = solver.maneuverNodes.IndexOf(node);
+						if(idx == count - 1) {
+							node = solver.maneuverNodes[0];
+						} else {
+							node = solver.maneuverNodes[++idx];
+						}
+						lastUT = node.UT;
+						return;
+					}
+				} else {
+					return;
+				}
+			}
+			GUILayout.EndHorizontal();
+
+            // Human-readable time
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Time:", GUILayout.Width(100));
+			GUILayout.Label(timeHuman, GUILayout.Width(130));
+			GUILayout.EndHorizontal();
+
+            // Increment buttons
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Increment:", GUILayout.Width(100));
+			if(increment == 0.01) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("0.01")) {
+				increment = 0.01;
+			}
+			GUI.backgroundColor = defaultColor;
+			if(increment == 0.1) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("0.1")) {
+				increment = 0.1;
+			}
+			GUI.backgroundColor = defaultColor;
+			if(increment == 1) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("1")) {
+				increment = 1;
+			}
+			GUI.backgroundColor = defaultColor;
+			if(increment == 10) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("10")) {
+				increment = 10;
+			}
+			GUI.backgroundColor = defaultColor;
+			if(increment == 100) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("100")) {
+				increment = 100;
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+            // Universal time controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("UT:", GUILayout.Width(100));
+			GUI.backgroundColor = Color.green;
+			String checkTime = GUILayout.TextField(timeUT, GUILayout.Width(100));
+			try {
+				convertedTime = Convert.ToDouble(checkTime);
+			} catch(FormatException) {
+				convertedTime = lastUT;
+			}
+			GUI.backgroundColor = Color.red;
+			if(GUILayout.Button("-")) {
+				convertedTime -= increment;
+			}
+			GUI.backgroundColor = Color.green;
+			if(GUILayout.Button("+")) {
+				convertedTime += increment;
+			}
+			if(convertedTime != node.attachedGizmo.UT) {
+				node.UT = convertedTime;
+				node.attachedGizmo.UT = convertedTime;
+				changed = true;
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+            // Prograde controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Prograde:", GUILayout.Width(100));
+			GUILayout.Label(prograde, GUILayout.Width(100));
+			GUI.backgroundColor = Color.red;
+			if(GUILayout.Button("-")) {
+				node.DeltaV.z -= increment;
+				node.attachedGizmo.DeltaV.z -= increment;
+				changed = true;
+			}
+			GUI.backgroundColor = Color.green;
+			if(GUILayout.Button("+")) {
+				node.DeltaV.z += increment;
+				node.attachedGizmo.DeltaV.z += increment;
+				changed = true;
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+            // Normal controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Normal:", GUILayout.Width(100));
+			GUILayout.Label(normal, GUILayout.Width(100));
+			GUI.backgroundColor = Color.red;
+			if(GUILayout.Button("-")) {
+				node.DeltaV.y -= increment;
+				node.attachedGizmo.DeltaV.y -= increment;
+				changed = true;
+			}
+			GUI.backgroundColor = Color.green;
+			if(GUILayout.Button("+")) {
+				node.DeltaV.y += increment;
+				node.attachedGizmo.DeltaV.y += increment;
+				changed = true;
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+            // radial controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Radial:", GUILayout.Width(100));
+			GUILayout.Label(radial, GUILayout.Width(100));
+			GUI.backgroundColor = Color.red;
+			if(GUILayout.Button("-")) {
+				node.DeltaV.x -= increment;
+				node.attachedGizmo.DeltaV.x -= increment;
+				changed = true;
+			}
+			GUI.backgroundColor = Color.green;
+			if(GUILayout.Button("+")) {
+				node.DeltaV.x += increment;
+				node.attachedGizmo.DeltaV.x += increment;
+				changed = true;
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+            // total delta-V display
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Total delta-V:",GUILayout.Width(100));
+			GUILayout.Label(node.DeltaV.magnitude.ToString("0.##") + "m/s");
+			GUILayout.EndHorizontal();
+
+            // Ejection angle
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Ejection Angle:", GUILayout.Width(100));
+			GUILayout.Label(eangle, GUILayout.Width(100));
+			GUILayout.EndHorizontal();
+
+            // Conics mode controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
+			if(conicsMode == 0) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("0")) {
+				conicsMode = 0;
+				setConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 1) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("1")) {
+				conicsMode = 1;
+				setConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 2) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("2")) {
+				conicsMode = 2;
+				setConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 3) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("3")) {
+				conicsMode = 3;
+				setConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 4) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("4")) {
+				conicsMode = 4;
+				setConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+
+			if(changed) {
+				node.solver.UpdateFlightPlan();
+			}
+		}
+
+        /// <summary>
+        /// Draws the Options window.
+        /// </summary>
+        /// <param name="id">Identifier.</param>
+		public void drawOptionsWindow(int id) {
+			Color defaultColor = GUI.backgroundColor;
+
+            // Close button
+			if(GUI.Button(new Rect(optionsWindowPos.width - 20, 2, 18, 18), "x")) {
+                showOptions = false;
+            }
+
+			GUILayout.BeginVertical();
+
+            // Set prograde controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Increment Prograde: " + progInc.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Increment Prograde...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.PROGINC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Decrement Prograde: " + progDec.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Decrement Prograde...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.PROGDEC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+            // set normal controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Increment Normal: " + normInc.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Increment Normal...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.NORMINC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Decrement Normal: " + normDec.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Decrement Normal...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.NORMDEC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+            // set radial controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Increment Radial: " + radiInc.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Increment Radial...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.RADIINC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Decrement Radial: " + radiDec.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Decrement Radial...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.RADIDEC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+            // set time controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Increment Time: " + timeInc.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Increment Time...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.TIMEINC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Decrement Time: " + timeDec.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Decrement Time...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.TIMEDEC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+            // set paging controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Page Increment: " + pageIncrement.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Page Increment...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.PAGEINC;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Page Conics: " + pageConics.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+                ScreenMessages.PostScreenMessage("Press a key to bind Page Conics Mode...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+                waitForKey = true;
+				currentWaitKey = (byte)KEYS.PAGECON;
+                keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+        }
+
+        /// <summary>
+        /// Returns whether the GUI can be shown based on a number of global factors.
+        /// </summary>
+        /// <value><c>true</c> if the GUI can be shown; otherwise, <c>false</c>.</value>
+		private bool canShow {
+			get {
+				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && MapView.MapIsEnabled && node != null;
+			}
+		}
+	
+        /// <summary>
+        /// Convenience function.
+        /// </summary>
+        /// <returns>The patched conic solver for the currently active vessel.</returns>
+		private PatchedConicSolver getSolver() {
+			return FlightGlobals.ActiveVessel.patchedConicSolver;
+		}
+
+        /// <summary>
+        /// Gets the ejection angle of the current maneuver node.
+        /// </summary>
+        /// <returns>The ejection angle in degrees.  Positive results are the angle from prograde, negative results are the angle from retrograde.</returns>
+        /// <param name="nodeUT">Kerbal Spece Program Universal Time.</param>
+		private double getEjectionAngle(double nodeUT) {
+			Orbit thisOrbit = FlightGlobals.ActiveVessel.orbit;
+			CelestialBody body = thisOrbit.referenceBody;
+
+			// Convert the node's orbit position to world space and get the raw ejection angle
+			// Vector3d worldpos = body.position + thisOrbit.getRelativePositionAtUT(nodeUT).xzy;
+			Vector3d worldpos = body.position + thisOrbit.getRelativePositionAtUT(nodeUT).xzy;
+			double eangle = ((body.GetLongitude(worldpos) + body.rotationAngle)	- (body.orbit.LAN / 360 + body.orbit.orbitPercent) * 360) % 360;
+
+			// Correct negative angles.
+			if(eangle < 0) {
+				eangle += 360;
+			}
+
+			// Correct to angle from retrograde if needed.
+			if(eangle < 270) {
+				eangle = 90 - eangle;
+				if(eangle < 0) {
+					eangle = (180 - Math.Abs(eangle)) * -1;
+				}
+			} else {
+				eangle = 450 - eangle;
+			}
+
+			return eangle;
+		}
+
+        /// <summary>
+        /// Converts the UT to human-readable Kerbal local time.
+        /// </summary>
+        /// <returns>The converted time.</returns>
+        /// <param name="UT">Kerbal Spece Program Universal Time.</param>
+		private String convertUTtoHumanTime(double UT) {
+			long secs = (long)(UT % 60);
+			long mins = (long)((UT / 60) % 60);
+			long hour = (long)((UT / 3600) % 24);
+			long day = (long)((UT / 86400) % 365) + 1;  // Ensure we don't get a "Day 0" here.
+			long year = (long)(UT / (86400 * 365)) + 1; // Ensure we don't get a "Year 0" here.
+
+			return "Year " + year + " Day " + day + " " + hour + ":" + (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+		}
+
+        /// <summary>
+        /// Sets the conics render mode
+        /// </summary>
+        /// <param name="mode">The conics render mode to use, one of 0, 1, 2, 3, or 4.  Arguments outside those will be set to 3.</param>
+		private void setConicsMode( int mode ) {
+			switch(mode) {
+			case 0:
+				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.LOCAL_TO_BODIES;
+				break;
+			case 1:
+				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.LOCAL_AT_SOI_ENTRY_UT;
+				break;
+			case 2:
+				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.LOCAL_AT_SOI_EXIT_UT;
+				break;
+			case 3:
+				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.RELATIVE;
+				break;
+			case 4:
+				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.DYNAMIC;
+				break;
+			default:
+				// revert to KSP default
+				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.RELATIVE;
+				break;
+			}
+		}
+
+        /// <summary>
+        /// Processes keyboard input.
+        /// </summary>
+		private void processKeyInput() {
+			if(!Input.anyKeyDown) {
+				return;
+			}
+
+            // process any key input for settings
+            if(waitForKey) {
+                KeyCode key = fetchKey();
+                // if the time is up or we have no key to process, reset.
+                if(((keyWaitTime + 5.0) < Planetarium.GetUniversalTime()) || key == KeyCode.None) {
+					Debug.Log("Outside wait time.");
+                    currentWaitKey = 255;
+                    waitForKey = false;
+                    return;
+                }
+
+                // which key are we waiting for?
+                switch(currentWaitKey) {
+					case (byte)KEYS.PROGINC:
+                        progInc = key;
+                        break;
+					case (byte)KEYS.PROGDEC:
+                        progDec = key;
+                        break;
+					case (byte)KEYS.NORMINC:
+                        normInc = key;
+                        break;
+					case (byte)KEYS.NORMDEC:
+                        normDec = key;
+                        break;
+					case (byte)KEYS.RADIINC:
+                        radiInc = key;
+                        break;
+					case (byte)KEYS.RADIDEC:
+                        radiDec = key;
+                        break;
+					case (byte)KEYS.TIMEINC:
+                        timeInc = key;
+                        break;
+					case (byte)KEYS.TIMEDEC:
+                        timeDec = key;
+                        break;
+					case (byte)KEYS.PAGEINC:
+                        pageIncrement = key;
+                        break;
+                    case (byte)KEYS.PAGECON:
+                        pageConics = key;
+                        break;
+                }
+                currentWaitKey = 255;
+                waitForKey = false;
+                return;
+            }
+
+            // process normal keyboard input
+			bool changed = false;
+            // change increment
+			if(Input.GetKeyDown(pageIncrement)) {
+				// change increment
+				if(increment == 0.01) {
+					increment = 0.1;
+				} else if(increment == 0.1) {
+					increment = 1;
+				} else if(increment == 1) {
+					increment = 10;
+				} else if(increment == 10) {
+					increment = 100;
+				} else if(increment == 100) {
+					increment = 0.01;
+				} else {
+					increment = 1;
+				}
+			}
+            // prograde increment
+			if(Input.GetKeyDown(progInc)) {
+				node.DeltaV.z += increment;
+				node.attachedGizmo.DeltaV.z += increment;
+				changed = true;
+			}
+            // prograde decrement
+			if(Input.GetKeyDown(progDec)) {
+				node.DeltaV.z -= increment;
+				node.attachedGizmo.DeltaV.z -= increment;
+				changed = true;
+			}
+            // normal increment
+			if(Input.GetKeyDown(normInc)) {
+				node.DeltaV.y += increment;
+				node.attachedGizmo.DeltaV.y += increment;
+				changed = true;
+			}
+            // normal decrement
+			if(Input.GetKeyDown(normDec)) {
+				node.DeltaV.y -= increment;
+				node.attachedGizmo.DeltaV.y -= increment;
+				changed = true;
+			}
+            // radial increment
+			if(Input.GetKeyDown(radiInc)) {
+				node.DeltaV.x += increment;
+				node.attachedGizmo.DeltaV.x += increment;
+				changed = true;
+			}
+            // radial decrement
+			if(Input.GetKeyDown(radiDec)) {
+				node.DeltaV.x -= increment;
+				node.attachedGizmo.DeltaV.x -= increment;
+				changed = true;
+			}
+            // UT increment
+			if(Input.GetKeyDown(timeInc)) {
+				node.UT += increment;
+				node.attachedGizmo.UT += increment;
+				lastUT = node.UT;
+				changed = true;
+			}
+            // UT decrement
+			if(Input.GetKeyDown(timeDec)) {
+				node.UT -= increment;
+				node.attachedGizmo.UT -= increment;
+				lastUT = node.UT;
+				changed = true;
+			}
+            // Page Conics
+			if(Input.GetKeyDown(pageConics)) {
+				if(conicsMode < 0) {
+					conicsMode = 0;
+				}
+				conicsMode++;
+				if(conicsMode > 4) {
+					conicsMode = 0;
+				}
+				setConicsMode(conicsMode);
+			}
+			if(changed) {
+				node.solver.UpdateFlightPlan();
+			}
+		}
+
+        /// <summary>
+        /// Load any saved configuration from file.
+        /// </summary>
+		private void loadConfig() {
+			Debug.Log("Loading PreciseNode settings.");
+			if(!configLoaded) {
+				config = KSP.IO.PluginConfiguration.CreateForType<PreciseNode>(null);
+				config.load();
+				configLoaded = true;
+
+				try {
+					conicsMode = config.GetValue<int>("conicsMode", 3);
+					mainWindowPos.x = config.GetValue<int>("mainWindowX", Screen.width / 10);
+					mainWindowPos.y = config.GetValue<int>("mainWindowY", 20);
+					optionsWindowPos.x = config.GetValue<int>("optWindowX", Screen.width / 3);
+					optionsWindowPos.y = config.GetValue<int>("optWindowY", 20);
+
+					string temp = config.GetValue<String>("progInc", "Keypad8");
+					progInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("progDec", "Keypad5");
+					progDec = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("normInc", "Keypad9");
+					normInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("normDec", "Keypad7");
+					normDec = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("radiInc", "Keypad6");
+					radiInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("radiDec", "Keypad4");
+					radiDec = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("timeInc", "Keypad3");
+					timeInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("timeDec", "Keypad1");
+					timeDec = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("pageIncrement", "Keypad0");
+					pageIncrement = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("pageConics", "KeypadEnter");
+					pageConics = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+				} catch(ArgumentException) {
+					// do nothing here, the defaults are already set
+				}
+			}
+		}
+
+        /// <summary>
+        /// Save our configuration to file.
+        /// </summary>
+		private void saveConfig() {
+			Debug.Log("Saving PreciseNode settings.");
+			if(!configLoaded) {
+				config = KSP.IO.PluginConfiguration.CreateForType<PreciseNode>(null);
+			}
+
+			config["conicsMode"] = conicsMode;
+			config["progInc"] = progInc.ToString();
+			config["progDec"] = progDec.ToString();
+			config["normInc"] = normInc.ToString();
+			config["normDec"] = normDec.ToString();
+			config["radiInc"] = radiInc.ToString();
+			config["radiDec"] = radiDec.ToString();
+			config["timeInc"] = timeInc.ToString();
+			config["timeDec"] = timeDec.ToString();
+			config["pageIncrement"] = pageIncrement.ToString();
+			config["pageConics"] = pageConics.ToString();
+            config["mainWindowX"] = (int)mainWindowPos.x;
+			config["mainWindowY"] = (int)mainWindowPos.y;
+			config["optWindowX"] = (int)optionsWindowPos.x;
+			config["optWindowY"] = (int)optionsWindowPos.y;
+
+			config.save();
+		}
+
+        /// <summary>
+        /// Function to figure out which KeyCode was pressed.
+        /// </summary>
+        private KeyCode fetchKey() {
+            int enums = System.Enum.GetNames(typeof(KeyCode)).Length;
+            for(int k = 0; k < enums; k++) {
+                if(Input.GetKey((KeyCode)k)) {
+                    return (KeyCode)k;
+                }
+            }
+ 
+           return KeyCode.None;
+        }
+	}	
+}
