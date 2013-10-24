@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using KSP.IO;
 
@@ -33,24 +34,34 @@ namespace RegexKSP {
 	[KSPAddon(KSPAddon.Startup.Flight, false)]
 
 	public class PreciseNode : MonoBehaviour {
-		private bool configLoaded = false;
-		private bool showOptions = false;
-		private bool conicsLoaded = false;
-		private Rect mainWindowPos = new Rect(Screen.width / 10, 20, 250, 130);
-		private Rect optionsWindowPos = new Rect(Screen.width / 3, 20, 250, 130);
-		private ManeuverNode node = null;
-		private double lastUT = 0;
-		private double increment = 1.0;
 		public PluginConfiguration config;
 
-        // options system
+		private NodeTools tools = new NodeTools();
+		private ManeuverNode node = null;
+		private Rect mainWindowPos = new Rect(Screen.width / 10, 20, 250, 130);
+		private Rect optionsWindowPos = new Rect(Screen.width / 3, 20, 250, 130);
+		private Rect keymapperWindowPos = new Rect(Screen.width / 5, 20, 250, 130);
+		private Rect clockWindowPos = new Rect(Screen.width / 3, Screen.height / 2, 250, 130);
+		private Rect conicsWindowPos = new Rect(Screen.width / 5, Screen.height / 2, 250, 130);
+
+		private bool configLoaded = false;
+		private bool showOptions = false;
+		private bool showKeymapper = false;
+		private bool showManeuverPager = true;
+		private bool showConicsAlways = false;
+		private bool showClock = false;
+		private bool showUTControls = false;
+		private bool showEAngle = true;
+		private bool showOrbitInfo = false;
+		private bool conicsLoaded = false;
+		private bool shown = true;
         private bool waitForKey = false;
         private byte currentWaitKey = 255;
-        private double keyWaitTime = 0.0;
-        private enum KEYS : byte {PROGINC, PROGDEC, NORMINC, NORMDEC, RADIINC, RADIDEC, TIMEINC, TIMEDEC, PAGEINC, PAGECON};
-
-		// default keymappings in case we have no config file ready.
 		private int conicsMode = 3;
+        private double keyWaitTime = 0.0;
+		private double lastUT = 0;
+		private double increment = 1.0;
+
 		private KeyCode progInc = KeyCode.Keypad8;
 		private KeyCode progDec = KeyCode.Keypad5;
 		private KeyCode normInc = KeyCode.Keypad9;
@@ -61,6 +72,8 @@ namespace RegexKSP {
 		private KeyCode timeDec = KeyCode.Keypad1;
 		private KeyCode pageIncrement = KeyCode.Keypad0;
 		private KeyCode pageConics = KeyCode.KeypadEnter;
+		private KeyCode hideWindow = KeyCode.P;
+		private KeyCode addWidget = KeyCode.O;
 
         /// <summary>
         /// Overridden function from MonoBehavior
@@ -92,7 +105,7 @@ namespace RegexKSP {
 				node = null;
 				lastUT = 0;
 			}
-			if(canShow) {
+			if(canShowNodeEditor) {
 				processKeyInput();
 			}
 		}
@@ -101,101 +114,135 @@ namespace RegexKSP {
         /// Overridden function from MonoBehavior
         /// </summary>
 		public void OnGUI() {
-			if(canShow) {
+			if(canShowNodeEditor) {
 				if(!conicsLoaded) {
-					setConicsMode(conicsMode);
+					tools.changeConicsMode(conicsMode);
 					conicsLoaded = true;
 				}
-				drawGUI();
-			}
+				if(shown) {
+					drawGUI();
+				} else if(canShowConicsWindow) {
+                    drawConicsGUI();
+                }
+			} else if(canShowConicsWindow) {
+                drawConicsGUI();
+            }
+            if(canShowClock) {
+                drawClockGUI();
+            }
 		}
 
         /// <summary>
-        /// Overridden function from MonoBehavior.
+        /// Draw Node Editor and Options GUI
         /// </summary>
 		public void drawGUI() {
 			GUI.skin = null;
 			mainWindowPos = GUILayout.Window(21349, mainWindowPos, drawMainWindow, "Precise Node", GUILayout.ExpandHeight(true));
             if(showOptions) {
-    			optionsWindowPos = GUILayout.Window(21350, optionsWindowPos, drawOptionsWindow, "Precise Node Options", GUILayout.ExpandHeight(true));
+				optionsWindowPos = GUILayout.Window(21350, optionsWindowPos, drawOptionsWindow, "Precise Node Options", GUILayout.ExpandHeight(true));
             }
+			if(showKeymapper) {
+				keymapperWindowPos = GUILayout.Window(21351, keymapperWindowPos, drawKeymapperWindow, "Precise Node Keys", GUILayout.ExpandHeight(true));
+			}
 		}
+
+        /// <summary>
+        /// Draw Clock GUI
+        /// </summary>
+        public void drawClockGUI() {
+			GUI.skin = null;
+            clockWindowPos = GUILayout.Window(21352, clockWindowPos, drawClockWindow, "Clock", GUILayout.ExpandHeight(true));
+        }
 		
         /// <summary>
-        /// Draws the GUI window.
+        /// Draw Conics GUI
+        /// </summary>
+        public void drawConicsGUI() {
+			GUI.skin = null;
+            conicsWindowPos = GUILayout.Window(21353, conicsWindowPos, drawConicsWindow, "Conics Controls", GUILayout.ExpandHeight(true));
+        }
+		
+        /// <summary>
+        /// Draws the Node Editor window.
         /// </summary>
         /// <param name="id">Identifier.</param>
 		public void drawMainWindow(int id) {
 			Color defaultColor = GUI.backgroundColor;
 			double convertedTime = 0;
 			bool changed = false;
-			PatchedConicSolver solver = getSolver();
+			PatchedConicSolver solver = tools.getSolver();
 
-			String timeHuman = convertUTtoHumanTime(lastUT);
-			String timeUT = lastUT.ToString("0.##");
-			String prograde = node.DeltaV.z.ToString("0.##") + "m/s";
-			String normal = node.DeltaV.y.ToString("0.##") + "m/s";
-			String radial = node.DeltaV.x.ToString("0.##") + "m/s";
+			String timeHuman = tools.convertUTtoHumanTime(lastUT);
+			String timeUT = lastUT.ToString("F2");
+			String prograde = node.DeltaV.z.ToString("F2") + "m/s";
+			String normal = node.DeltaV.y.ToString("F2") + "m/s";
+			String radial = node.DeltaV.x.ToString("F2") + "m/s";
 			String eangle = "n/a";
 			if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
-				eangle = getEjectionAngle(node.UT).ToString("0.##") + "°";
+				eangle = tools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, node.UT).ToString("F2") + "°";
 			}
 
-            // Options button
-			if(GUI.Button(new Rect(mainWindowPos.width - 20, 2, 18, 18), "=")) {
-                showOptions = true;
+			// Options button
+			if(GUI.Button(new Rect(mainWindowPos.width - 48, 2, 22, 18), "O")) {
+				showOptions = true;
+			}
+            // Keymapping button
+			if(GUI.Button(new Rect(mainWindowPos.width - 24, 2, 22, 18), "K")) {
+                showKeymapper = true;
             }
 
 			GUILayout.BeginVertical();
 
-            // Maneuver node paging controls
-			GUILayout.BeginHorizontal();
-			if(GUILayout.Button("<")) {
-				int count = solver.maneuverNodes.Count;
-				if(count > 1) {
-					if(node == null) {
-						// get the first node.
-						node = solver.maneuverNodes[0];
-						lastUT = node.UT;
-					} else {
-						// get the previous or last node
-						int idx = solver.maneuverNodes.IndexOf(node);
-						if(idx == 0) {
-							node = solver.maneuverNodes[--count];
-						} else {
-							node = solver.maneuverNodes[--idx];
-						}
-						lastUT = node.UT;
-						return;
-					}
-				} else {
-					return;
-				}
-			}
-			GUILayout.Label("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1), GUILayout.Width(100));
-			if(GUILayout.Button(">")) {
-				int count = solver.maneuverNodes.Count;
-				if(count > 1) {
-					if(node == null) {
-						// get the first node.
-						node = solver.maneuverNodes[0];
-						lastUT = node.UT;
-					} else {
-						// get the previous or last node
-						int idx = solver.maneuverNodes.IndexOf(node);
-						if(idx == count - 1) {
+			if(showManeuverPager) {
+	            // Maneuver node paging controls
+				GUILayout.BeginHorizontal();
+				if(GUILayout.Button("<")) {
+					int count = solver.maneuverNodes.Count;
+					if(count > 1) {
+						if(node == null) {
+							// get the first node.
 							node = solver.maneuverNodes[0];
+							lastUT = node.UT;
 						} else {
-							node = solver.maneuverNodes[++idx];
+							// get the previous or last node
+							int idx = solver.maneuverNodes.IndexOf(node);
+							if(idx == 0) {
+								node = solver.maneuverNodes[--count];
+							} else {
+								node = solver.maneuverNodes[--idx];
+							}
+							lastUT = node.UT;
+							return;
 						}
-						lastUT = node.UT;
+					} else {
 						return;
 					}
-				} else {
-					return;
 				}
+				GUILayout.Label("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1), GUILayout.Width(100));
+				if(GUILayout.Button(">")) {
+					int count = solver.maneuverNodes.Count;
+					if(count > 1) {
+						if(node == null) {
+							// get the first node.
+							node = solver.maneuverNodes[0];
+							lastUT = node.UT;
+						} else {
+							// get the previous or last node
+							int idx = solver.maneuverNodes.IndexOf(node);
+							if(idx == count - 1) {
+								node = solver.maneuverNodes[0];
+							} else {
+								node = solver.maneuverNodes[++idx];
+							}
+							lastUT = node.UT;
+							return;
+						}
+					} else {
+						return;
+					}
+				}
+				GUILayout.EndHorizontal();
 			}
-			GUILayout.EndHorizontal();
 
             // Human-readable time
 			GUILayout.BeginHorizontal();
@@ -261,13 +308,37 @@ namespace RegexKSP {
 			if(GUILayout.Button("+")) {
 				convertedTime += increment;
 			}
-			if(convertedTime != node.attachedGizmo.UT) {
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+			if(showUTControls) {
+				GUILayout.BeginHorizontal();
+				GUILayout.Label("", GUILayout.Width(100));
+				GUI.backgroundColor = Color.magenta;
+				if(GUILayout.Button("-10K")) {
+					convertedTime -= 10000;
+				}
+				GUI.backgroundColor = Color.red;
+				if(GUILayout.Button("-1K")) {
+					convertedTime -= 1000;
+				}
+				GUI.backgroundColor = Color.green;
+				if(GUILayout.Button("+1K")) {
+					convertedTime += 1000;
+				}
+				GUI.backgroundColor = Color.cyan;
+				if(GUILayout.Button("+10K")) {
+					convertedTime += 10000;
+				}
+				GUI.backgroundColor = defaultColor;
+				GUILayout.EndHorizontal();
+			}
+
+			if(convertedTime != node.UT) {
 				node.UT = convertedTime;
 				node.attachedGizmo.UT = convertedTime;
 				changed = true;
 			}
-			GUI.backgroundColor = defaultColor;
-			GUILayout.EndHorizontal();
 
             // Prograde controls
 			GUILayout.BeginHorizontal();
@@ -332,13 +403,42 @@ namespace RegexKSP {
 			GUILayout.Label(node.DeltaV.magnitude.ToString("0.##") + "m/s");
 			GUILayout.EndHorizontal();
 
-            // Ejection angle
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("Ejection Angle:", GUILayout.Width(100));
-			GUILayout.Label(eangle, GUILayout.Width(100));
-			GUILayout.EndHorizontal();
+			// Ejection angle
+			if(showEAngle) {
+				GUILayout.BeginHorizontal();
+				GUILayout.Label("Ejection Angle:", GUILayout.Width(100));
+				GUILayout.Label(eangle, GUILayout.Width(100));
+				GUILayout.EndHorizontal();
+			}
 
-            // Conics mode controls
+			// Additional Information
+			if(showOrbitInfo) {
+				// Find the next encounter, if any, in our flight plan.
+				Orbit nextEnc = tools.findNextEncounter(node);
+				if(nextEnc == null) {
+					List<Orbit> plan = node.solver.flightPlan;
+					if(plan.Count > 1) {
+						// output the apoapsis and periapsis of our projected orbit.
+						GUILayout.BeginHorizontal();
+						GUILayout.Label("Apoapsis:", GUILayout.Width(100));
+						GUILayout.Label(tools.formatMeters(plan[1].ApA), GUILayout.Width(100));
+						GUILayout.EndHorizontal();
+
+						GUILayout.BeginHorizontal();
+						GUILayout.Label("Periapsis:", GUILayout.Width(100));
+						GUILayout.Label(tools.formatMeters(plan[1].PeA), GUILayout.Width(100));
+						GUILayout.EndHorizontal();
+					}
+				} else {
+					// Next encounter periapsis
+					GUILayout.BeginHorizontal();
+					GUILayout.Label("(" + nextEnc.referenceBody.name + ") Pe:", GUILayout.Width(100));
+					GUILayout.Label(tools.formatMeters(nextEnc.PeA), GUILayout.Width(100));
+					GUILayout.EndHorizontal();
+				}
+			}
+
+			// Conics mode controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
 			if(conicsMode == 0) {
@@ -346,7 +446,7 @@ namespace RegexKSP {
 			}
 			if(GUILayout.Button("0")) {
 				conicsMode = 0;
-				setConicsMode(conicsMode);
+				tools.changeConicsMode(conicsMode);
 			}
 			GUI.backgroundColor = defaultColor;
 			if(conicsMode == 1) {
@@ -354,7 +454,7 @@ namespace RegexKSP {
 			}
 			if(GUILayout.Button("1")) {
 				conicsMode = 1;
-				setConicsMode(conicsMode);
+				tools.changeConicsMode(conicsMode);
 			}
 			GUI.backgroundColor = defaultColor;
 			if(conicsMode == 2) {
@@ -362,7 +462,7 @@ namespace RegexKSP {
 			}
 			if(GUILayout.Button("2")) {
 				conicsMode = 2;
-				setConicsMode(conicsMode);
+				tools.changeConicsMode(conicsMode);
 			}
 			GUI.backgroundColor = defaultColor;
 			if(conicsMode == 3) {
@@ -370,7 +470,7 @@ namespace RegexKSP {
 			}
 			if(GUILayout.Button("3")) {
 				conicsMode = 3;
-				setConicsMode(conicsMode);
+				tools.changeConicsMode(conicsMode);
 			}
 			GUI.backgroundColor = defaultColor;
 			if(conicsMode == 4) {
@@ -378,11 +478,25 @@ namespace RegexKSP {
 			}
 			if(GUILayout.Button("4")) {
 				conicsMode = 4;
-				setConicsMode(conicsMode);
+				tools.changeConicsMode(conicsMode);
 			}
 			GUI.backgroundColor = defaultColor;
 			GUILayout.EndHorizontal();
 
+			// conics patch limit editor.
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Change Conics Samples", GUILayout.Width(200));
+			GUI.backgroundColor = Color.red;
+			if(GUILayout.Button("-")) {
+				solver.DecreasePatchLimit();
+			}
+			GUI.backgroundColor = Color.green;
+			if(GUILayout.Button("+")) {
+				solver.IncreasePatchLimit();
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+	
 			GUILayout.EndVertical();
 			GUI.DragWindow();
 
@@ -391,19 +505,162 @@ namespace RegexKSP {
 			}
 		}
 
-        /// <summary>
-        /// Draws the Options window.
-        /// </summary>
-        /// <param name="id">Identifier.</param>
+		/// <summary>
+		/// Draws the Clock window.
+		/// </summary>
+		/// <param name="id">Identifier.</param>
+        public void drawClockWindow(int id) {
+			Color defaultColor = GUI.backgroundColor;
+            double timeNow = Planetarium.GetUniversalTime();
+			String timeUT = timeNow.ToString("D");
+			String timeHuman = tools.convertUTtoHumanTime(timeNow);
+
+			GUILayout.BeginVertical();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Time:", GUILayout.Width(50));
+			GUILayout.Label(timeHuman, GUILayout.Width(150));
+			GUILayout.EndHorizontal();
+
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("UT:", GUILayout.Width(50));
+			GUILayout.Label(timeHuman, GUILayout.Width(150));
+			GUILayout.EndHorizontal();
+
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+        }
+
+		/// <summary>
+		/// Draws the Conics window.
+		/// </summary>
+		/// <param name="id">Identifier.</param>
+        public void drawConicsWindow(int id) {
+			Color defaultColor = GUI.backgroundColor;
+
+			GUILayout.BeginVertical();
+
+			// Conics mode controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
+			if(conicsMode == 0) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("0")) {
+				conicsMode = 0;
+				tools.changeConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 1) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("1")) {
+				conicsMode = 1;
+				tools.changeConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 2) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("2")) {
+				conicsMode = 2;
+				tools.changeConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 3) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("3")) {
+				conicsMode = 3;
+				tools.changeConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			if(conicsMode == 4) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("4")) {
+				conicsMode = 4;
+				tools.changeConicsMode(conicsMode);
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+
+			// conics patch limit editor.
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Change Conics Samples", GUILayout.Width(200));
+			GUI.backgroundColor = Color.red;
+			if(GUILayout.Button("-")) {
+				solver.DecreasePatchLimit();
+			}
+			GUI.backgroundColor = Color.green;
+			if(GUILayout.Button("+")) {
+				solver.IncreasePatchLimit();
+			}
+			GUI.backgroundColor = defaultColor;
+			GUILayout.EndHorizontal();
+	
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+        }
+
+		/// <summary>
+		/// Draws the Options window.
+		/// </summary>
+		/// <param name="id">Identifier.</param>
 		public void drawOptionsWindow(int id) {
 			Color defaultColor = GUI.backgroundColor;
 
+			// Close button
+			if(GUI.Button(new Rect(optionsWindowPos.width - 24, 2, 22, 18), "X")) {
+				showOptions = false;
+			}
+
+			GUILayout.BeginVertical();
+			showConicsAlways = GUILayout.Toggle(showConicsAlways, "Always Show Conics Controls");
+			showClock = GUILayout.Toggle(showClock, "Show Clock");
+			showManeuverPager = GUILayout.Toggle(showManeuverPager, "Show Maneuver Pager");
+			showUTControls = GUILayout.Toggle(showUTControls, "Show Additional UT Controls");
+			showEAngle = GUILayout.Toggle(showEAngle, "Show Ejection Angle");
+			showOrbitInfo = GUILayout.Toggle(showOrbitInfo, "Show Orbit Information");
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+		}
+
+        /// <summary>
+        /// Draws the Keymapper window.
+        /// </summary>
+        /// <param name="id">Identifier.</param>
+		public void drawKeymapperWindow(int id) {
+			Color defaultColor = GUI.backgroundColor;
+
             // Close button
-			if(GUI.Button(new Rect(optionsWindowPos.width - 20, 2, 18, 18), "x")) {
-                showOptions = false;
+			if(GUI.Button(new Rect(keymapperWindowPos.width - 24, 2, 22, 18), "X")) {
+                showKeymapper = false;
             }
 
 			GUILayout.BeginVertical();
+
+			// Set window control
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Hide/Show Window: " + hideWindow.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+				ScreenMessages.PostScreenMessage("Press a key to bind Hide/Show Window...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+				waitForKey = true;
+				currentWaitKey = (byte)KEYS.HIDEWINDOW;
+				keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
+
+			// Set add node widget button
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Open Node Gizmo: " + addWidget.ToString(), GUILayout.Width(200));
+			if(GUILayout.Button("set")) {
+				ScreenMessages.PostScreenMessage("Press a key to bind Open Node Gizmo...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
+				waitForKey = true;
+				currentWaitKey = (byte)KEYS.ADDWIDGET;
+				keyWaitTime = Planetarium.GetUniversalTime();
+			}
+			GUILayout.EndHorizontal();
 
             // Set prograde controls
 			GUILayout.BeginHorizontal();
@@ -515,95 +772,32 @@ namespace RegexKSP {
         }
 
         /// <summary>
-        /// Returns whether the GUI can be shown based on a number of global factors.
+        /// Returns whether the Node Editor can be shown based on a number of global factors.
         /// </summary>
-        /// <value><c>true</c> if the GUI can be shown; otherwise, <c>false</c>.</value>
-		private bool canShow {
+        /// <value><c>true</c> if the Node Editor can be shown; otherwise, <c>false</c>.</value>
+		private bool canShowNodeEditor {
 			get {
 				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && MapView.MapIsEnabled && node != null;
 			}
 		}
-	
-        /// <summary>
-        /// Convenience function.
-        /// </summary>
-        /// <returns>The patched conic solver for the currently active vessel.</returns>
-		private PatchedConicSolver getSolver() {
-			return FlightGlobals.ActiveVessel.patchedConicSolver;
-		}
 
         /// <summary>
-        /// Gets the ejection angle of the current maneuver node.
+        /// Returns whether the Conics Window can be shown based on a number of global factors.
         /// </summary>
-        /// <returns>The ejection angle in degrees.  Positive results are the angle from prograde, negative results are the angle from retrograde.</returns>
-        /// <param name="nodeUT">Kerbal Spece Program Universal Time.</param>
-		private double getEjectionAngle(double nodeUT) {
-			Orbit thisOrbit = FlightGlobals.ActiveVessel.orbit;
-			CelestialBody body = thisOrbit.referenceBody;
-
-			// Convert the node's orbit position to world space and get the raw ejection angle
-			// Vector3d worldpos = body.position + thisOrbit.getRelativePositionAtUT(nodeUT).xzy;
-			Vector3d worldpos = body.position + thisOrbit.getRelativePositionAtUT(nodeUT).xzy;
-			double eangle = ((body.GetLongitude(worldpos) + body.rotationAngle)	- (body.orbit.LAN / 360 + body.orbit.orbitPercent) * 360) % 360;
-
-			// Correct negative angles.
-			if(eangle < 0) {
-				eangle += 360;
+        /// <value><c>true</c> if the Conics Window can be shown; otherwise, <c>false</c>.</value>
+		private bool canShowConicsWindow {
+			get {
+				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && MapView.MapIsEnabled && showConicsAlways;
 			}
-
-			// Correct to angle from retrograde if needed.
-			if(eangle < 270) {
-				eangle = 90 - eangle;
-				if(eangle < 0) {
-					eangle = (180 - Math.Abs(eangle)) * -1;
-				}
-			} else {
-				eangle = 450 - eangle;
-			}
-
-			return eangle;
 		}
 
         /// <summary>
-        /// Converts the UT to human-readable Kerbal local time.
+        /// Returns whether the Clock Window can be shown based on a number of global factors.
         /// </summary>
-        /// <returns>The converted time.</returns>
-        /// <param name="UT">Kerbal Spece Program Universal Time.</param>
-		private String convertUTtoHumanTime(double UT) {
-			long secs = (long)(UT % 60);
-			long mins = (long)((UT / 60) % 60);
-			long hour = (long)((UT / 3600) % 24);
-			long day = (long)((UT / 86400) % 365) + 1;  // Ensure we don't get a "Day 0" here.
-			long year = (long)(UT / (86400 * 365)) + 1; // Ensure we don't get a "Year 0" here.
-
-			return "Year " + year + " Day " + day + " " + hour + ":" + (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
-		}
-
-        /// <summary>
-        /// Sets the conics render mode
-        /// </summary>
-        /// <param name="mode">The conics render mode to use, one of 0, 1, 2, 3, or 4.  Arguments outside those will be set to 3.</param>
-		private void setConicsMode( int mode ) {
-			switch(mode) {
-			case 0:
-				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.LOCAL_TO_BODIES;
-				break;
-			case 1:
-				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.LOCAL_AT_SOI_ENTRY_UT;
-				break;
-			case 2:
-				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.LOCAL_AT_SOI_EXIT_UT;
-				break;
-			case 3:
-				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.RELATIVE;
-				break;
-			case 4:
-				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.DYNAMIC;
-				break;
-			default:
-				// revert to KSP default
-				FlightGlobals.ActiveVessel.patchedConicRenderer.relativityMode = PatchRendering.RelativityMode.RELATIVE;
-				break;
+        /// <value><c>true</c> if the Clock Window can be shown; otherwise, <c>false</c>.</value>
+		private bool canShowClock {
+			get {
+				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && showClock;
 			}
 		}
 
@@ -617,7 +811,7 @@ namespace RegexKSP {
 
             // process any key input for settings
             if(waitForKey) {
-                KeyCode key = fetchKey();
+				KeyCode key = tools.fetchKey();
                 // if the time is up or we have no key to process, reset.
                 if(((keyWaitTime + 5.0) < Planetarium.GetUniversalTime()) || key == KeyCode.None) {
 					Debug.Log("Outside wait time.");
@@ -658,6 +852,12 @@ namespace RegexKSP {
                     case (byte)KEYS.PAGECON:
                         pageConics = key;
                         break;
+					case (byte)KEYS.HIDEWINDOW:
+						hideWindow = key;
+						break;
+					case (byte)KEYS.ADDWIDGET:
+						addWidget = key;
+						break;
                 }
                 currentWaitKey = 255;
                 waitForKey = false;
@@ -668,19 +868,36 @@ namespace RegexKSP {
 			bool changed = false;
             // change increment
 			if(Input.GetKeyDown(pageIncrement)) {
-				// change increment
-				if(increment == 0.01) {
-					increment = 0.1;
-				} else if(increment == 0.1) {
-					increment = 1;
-				} else if(increment == 1) {
-					increment = 10;
-				} else if(increment == 10) {
-					increment = 100;
-				} else if(increment == 100) {
-					increment = 0.01;
+				if(Event.current.alt) {
+					// change increment
+					if(increment == 0.01) {
+						increment = 100;
+					} else if(increment == 0.1) {
+						increment = 0.01;
+					} else if(increment == 1) {
+						increment = 0.1;
+					} else if(increment == 10) {
+						increment = 1;
+					} else if(increment == 100) {
+						increment = 10;
+					} else {
+						increment = 1;
+					}
 				} else {
-					increment = 1;
+					// change increment
+					if(increment == 0.01) {
+						increment = 0.1;
+					} else if(increment == 0.1) {
+						increment = 1;
+					} else if(increment == 1) {
+						increment = 10;
+					} else if(increment == 10) {
+						increment = 100;
+					} else if(increment == 100) {
+						increment = 0.01;
+					} else {
+						increment = 1;
+					}
 				}
 			}
             // prograde increment
@@ -742,8 +959,17 @@ namespace RegexKSP {
 				if(conicsMode > 4) {
 					conicsMode = 0;
 				}
-				setConicsMode(conicsMode);
+				tools.changeConicsMode(conicsMode);
 			}
+			// hide/show window
+			if(Input.GetKeyDown(hideWindow)) {
+				shown = !shown;
+			}
+			// open node gizmo
+			if(Input.GetKeyDown(addWidget)) {
+				tools.CreateNodeGizmo(node);
+			}
+			// If anything changed update the flightplan.
 			if(changed) {
 				node.solver.UpdateFlightPlan();
 			}
@@ -765,6 +991,18 @@ namespace RegexKSP {
 					mainWindowPos.y = config.GetValue<int>("mainWindowY", 20);
 					optionsWindowPos.x = config.GetValue<int>("optWindowX", Screen.width / 3);
 					optionsWindowPos.y = config.GetValue<int>("optWindowY", 20);
+					keymapperWindowPos.x = config.GetValue<int>("keyWindowX", Screen.width / 5);
+					keymapperWindowPos.y = config.GetValue<int>("keyWindowY", 20);
+					clockWindowPos.x = config.GetValue<int>("clockWindowX", Screen.width / 3);
+					clockWindowPos.y = config.GetValue<int>("clockWindowY", Screen.height / 2);
+					conicsWindowPos.x = config.GetValue<int>("conicsWindowX", Screen.width / 5);
+					conicsWindowPos.y = config.GetValue<int>("conicsWindowY", Screen.height / 2);
+					showClock = config.GetValue<bool>("showClock", false);
+					showEAngle = config.GetValue<bool>("showEAngle", true);
+					showConicsAlways = config.GetValue<bool>("showConicsAlways", false);
+					showOrbitInfo = config.GetValue<bool>("showOrbitInfo", false);
+					showUTControls = config.GetValue<bool>("showUTControls", false);
+					showManeuverPager = config.GetValue<bool>("showManeuverPager", true);
 
 					string temp = config.GetValue<String>("progInc", "Keypad8");
 					progInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
@@ -786,6 +1024,10 @@ namespace RegexKSP {
 					pageIncrement = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
 					temp = config.GetValue<String>("pageConics", "KeypadEnter");
 					pageConics = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("hideWindow", "P");
+					hideWindow = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
+					temp = config.GetValue<String>("addWidget", "O");
+					addWidget = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
 				} catch(ArgumentException) {
 					// do nothing here, the defaults are already set
 				}
@@ -812,26 +1054,41 @@ namespace RegexKSP {
 			config["timeDec"] = timeDec.ToString();
 			config["pageIncrement"] = pageIncrement.ToString();
 			config["pageConics"] = pageConics.ToString();
+			config["hideWindow"] = hideWindow.ToString();
+			config["addWidget"] = addWidget.ToString();
             config["mainWindowX"] = (int)mainWindowPos.x;
 			config["mainWindowY"] = (int)mainWindowPos.y;
 			config["optWindowX"] = (int)optionsWindowPos.x;
 			config["optWindowY"] = (int)optionsWindowPos.y;
+			config["keyWindowX"] = (int)keymapperWindowPos.x;
+			config["keyWindowY"] = (int)keymapperWindowPos.y;
+			config["clockWindowX"] = (int)clockWindowPos.x;
+			config["clockWindowY"] = (int)clockWindowPos.y;
+			config["conicsWindowX"] = (int)conicsWindowPos.x;
+			config["conicsWindowY"] = (int)conicsWindowPos.y;
+			config["showClock"] = showClock;
+			config["showEAngle"] = showEAngle;
+			config["showConicsAlways"] = showConicsAlways;
+			config["showOrbitInfo"] = showOrbitInfo;
+			config["showUTControls"] = showUTControls;
+			config["showManeuverPager"] = showManeuverPager;
 
 			config.save();
 		}
 
-        /// <summary>
-        /// Function to figure out which KeyCode was pressed.
-        /// </summary>
-        private KeyCode fetchKey() {
-            int enums = System.Enum.GetNames(typeof(KeyCode)).Length;
-            for(int k = 0; k < enums; k++) {
-                if(Input.GetKey((KeyCode)k)) {
-                    return (KeyCode)k;
-                }
-            }
- 
-           return KeyCode.None;
-        }
+        private enum KEYS : byte {
+            PROGINC,
+            PROGDEC,
+            NORMINC,
+            NORMDEC,
+            RADIINC,
+            RADIDEC,
+            TIMEINC,
+            TIMEDEC,
+            PAGEINC,
+            PAGECON,
+            HIDEWINDOW,
+            ADDWIDGET
+        };
 	}	
 }
