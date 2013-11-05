@@ -41,8 +41,9 @@ namespace RegexKSP {
 		private Rect mainWindowPos = new Rect(Screen.width / 10, 20, 250, 130);
 		private Rect optionsWindowPos = new Rect(Screen.width / 3, 20, 250, 130);
 		private Rect keymapperWindowPos = new Rect(Screen.width / 5, 20, 250, 130);
-		private Rect clockWindowPos = new Rect(Screen.width / 3, Screen.height / 2, 250, 130);
-		private Rect conicsWindowPos = new Rect(Screen.width / 5, Screen.height / 2, 250, 130);
+		private Rect clockWindowPos = new Rect(Screen.width / 3, Screen.height / 2, 195, 65);
+		private Rect conicsWindowPos = new Rect(Screen.width / 5, Screen.height / 2, 250, 65);
+		private Rect tripWindowPos = new Rect(Screen.width / 5, Screen.height / 5, 320, 65);
 
 		private bool configLoaded = false;
 		private bool showOptions = false;
@@ -50,12 +51,14 @@ namespace RegexKSP {
 		private bool showManeuverPager = true;
 		private bool showConicsAlways = false;
 		private bool showClock = false;
+		private bool showTrip = false;
 		private bool showUTControls = false;
 		private bool showEAngle = true;
 		private bool showOrbitInfo = false;
 		private bool conicsLoaded = false;
 		private bool shown = true;
         private bool waitForKey = false;
+		private bool nodeChanged = false;
         private byte currentWaitKey = 255;
 		private int conicsMode = 3;
         private double keyWaitTime = 0.0;
@@ -94,16 +97,20 @@ namespace RegexKSP {
         /// Overridden function from MonoBehavior
         /// </summary>
 		public void Update() {
-			PatchedConicSolver solver = FlightGlobals.ActiveVessel.patchedConicSolver;
+			PatchedConicSolver solver = tools.getSolver();
 			if(solver.maneuverNodes.Count > 0) {
 				if(node == null || !solver.maneuverNodes.Contains(node)) {
 					// get the first one if we can't find the current or it's null
 					node = solver.maneuverNodes[0];
+					nodeChanged = true;
 				}
 				lastUT = node.UT;
 			} else {
-				node = null;
-				lastUT = 0;
+				if(lastUT != 0) {
+					node = null;
+					nodeChanged = true;
+					lastUT = 0;
+				}
 			}
 			if(canShowNodeEditor) {
 				processKeyInput();
@@ -144,6 +151,9 @@ namespace RegexKSP {
 			if(showKeymapper) {
 				keymapperWindowPos = GUILayout.Window(21351, keymapperWindowPos, drawKeymapperWindow, "Precise Node Keys", GUILayout.ExpandHeight(true));
 			}
+			if(showTrip) {
+				tripWindowPos = GUILayout.Window(21352, tripWindowPos, drawTripWindow, "Trip Info", GUILayout.ExpandHeight(true));
+			}
 		}
 
         /// <summary>
@@ -151,7 +161,7 @@ namespace RegexKSP {
         /// </summary>
         public void drawClockGUI() {
 			GUI.skin = null;
-            clockWindowPos = GUILayout.Window(21352, clockWindowPos, drawClockWindow, "Clock", GUILayout.ExpandHeight(true));
+            clockWindowPos = GUILayout.Window(21353, clockWindowPos, drawClockWindow, "Clock", GUILayout.ExpandHeight(true));
         }
 		
         /// <summary>
@@ -159,7 +169,7 @@ namespace RegexKSP {
         /// </summary>
         public void drawConicsGUI() {
 			GUI.skin = null;
-            conicsWindowPos = GUILayout.Window(21353, conicsWindowPos, drawConicsWindow, "Conics Controls", GUILayout.ExpandHeight(true));
+            conicsWindowPos = GUILayout.Window(21354, conicsWindowPos, drawConicsWindow, "Conics Controls", GUILayout.ExpandHeight(true));
         }
 		
         /// <summary>
@@ -173,13 +183,13 @@ namespace RegexKSP {
 			PatchedConicSolver solver = tools.getSolver();
 
 			String timeHuman = tools.convertUTtoHumanTime(lastUT);
-			String timeUT = lastUT.ToString("F2");
-			String prograde = node.DeltaV.z.ToString("F2") + "m/s";
-			String normal = node.DeltaV.y.ToString("F2") + "m/s";
-			String radial = node.DeltaV.x.ToString("F2") + "m/s";
+			String timeUT = lastUT.ToString("0.##");
+			String prograde = node.DeltaV.z.ToString("0.##") + "m/s";
+			String normal = node.DeltaV.y.ToString("0.##") + "m/s";
+			String radial = node.DeltaV.x.ToString("0.##") + "m/s";
 			String eangle = "n/a";
 			if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
-				eangle = tools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, node.UT).ToString("F2") + "°";
+				eangle = tools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, node.UT).ToString("0.##") + "°";
 			}
 
 			// Options button
@@ -496,6 +506,17 @@ namespace RegexKSP {
 			}
 			GUI.backgroundColor = defaultColor;
 			GUILayout.EndHorizontal();
+
+			// trip info button
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("", GUILayout.Width(100));
+			if(showTrip) {
+				GUI.backgroundColor = Color.yellow;
+			}
+			if(GUILayout.Button("Trip Info")) {
+				showTrip = !showTrip;
+			}
+			GUILayout.EndHorizontal();
 	
 			GUILayout.EndVertical();
 			GUI.DragWindow();
@@ -512,20 +533,36 @@ namespace RegexKSP {
         public void drawClockWindow(int id) {
 			Color defaultColor = GUI.backgroundColor;
             double timeNow = Planetarium.GetUniversalTime();
-			String timeUT = timeNow.ToString("D");
+			String timeUT = timeNow.ToString("F0");
 			String timeHuman = tools.convertUTtoHumanTime(timeNow);
 
 			GUILayout.BeginVertical();
 
 			GUILayout.BeginHorizontal();
-			GUILayout.Label("Time:", GUILayout.Width(50));
+			GUILayout.Label("Time:", GUILayout.Width(35));
 			GUILayout.Label(timeHuman, GUILayout.Width(150));
 			GUILayout.EndHorizontal();
 
 			GUILayout.BeginHorizontal();
-			GUILayout.Label("UT:", GUILayout.Width(50));
-			GUILayout.Label(timeHuman, GUILayout.Width(150));
+			GUILayout.Label("UT:", GUILayout.Width(35));
+			GUILayout.Label(Math.Floor(timeNow).ToString("F0"), GUILayout.Width(150));
 			GUILayout.EndHorizontal();
+
+			if(node != null) {
+				double next = timeNow - tools.getSolver().maneuverNodes[0].UT;
+				GUILayout.BeginHorizontal();
+				GUILayout.Label("Next:", GUILayout.Width(35));
+				if(next < 0) {
+					GUILayout.Label("T- " + tools.convertUTtoHumanDuration(next), GUILayout.Width(150));
+				} else {
+					GUILayout.Label("T+ " + tools.convertUTtoHumanDuration(next), GUILayout.Width(150));
+				}
+				GUILayout.EndHorizontal();
+			}
+			if(nodeChanged) {
+				clockWindowPos.height = 65;
+				nodeChanged = false;
+			}
 
 			GUILayout.EndVertical();
 			GUI.DragWindow();
@@ -536,6 +573,7 @@ namespace RegexKSP {
 		/// </summary>
 		/// <param name="id">Identifier.</param>
         public void drawConicsWindow(int id) {
+			PatchedConicSolver solver = tools.getSolver();
 			Color defaultColor = GUI.backgroundColor;
 
 			GUILayout.BeginVertical();
@@ -618,10 +656,27 @@ namespace RegexKSP {
 			GUILayout.BeginVertical();
 			showConicsAlways = GUILayout.Toggle(showConicsAlways, "Always Show Conics Controls");
 			showClock = GUILayout.Toggle(showClock, "Show Clock");
-			showManeuverPager = GUILayout.Toggle(showManeuverPager, "Show Maneuver Pager");
-			showUTControls = GUILayout.Toggle(showUTControls, "Show Additional UT Controls");
-			showEAngle = GUILayout.Toggle(showEAngle, "Show Ejection Angle");
-			showOrbitInfo = GUILayout.Toggle(showOrbitInfo, "Show Orbit Information");
+			// use a temp variable so we can check whether the main window needs resizing.
+			bool temp = GUILayout.Toggle(showManeuverPager, "Show Maneuver Pager");
+			if(temp != showManeuverPager) {
+				showManeuverPager = temp;
+				mainWindowPos.height = 250;
+			}
+			temp = GUILayout.Toggle(showUTControls, "Show Additional UT Controls");
+			if(temp != showUTControls) {
+				showUTControls = temp;
+				mainWindowPos.height = 250;
+			}
+			temp = GUILayout.Toggle(showEAngle, "Show Ejection Angle");
+			if(temp != showEAngle) {
+				showEAngle = temp;
+				mainWindowPos.height = 250;
+			}
+			temp = GUILayout.Toggle(showOrbitInfo, "Show Orbit Information");
+			if(temp != showOrbitInfo) {
+				showOrbitInfo = temp;
+				mainWindowPos.height = 250;
+			}
 			GUILayout.EndVertical();
 			GUI.DragWindow();
 		}
@@ -770,6 +825,46 @@ namespace RegexKSP {
 			GUILayout.EndVertical();
 			GUI.DragWindow();
         }
+
+		public void drawTripWindow(int id) {
+			PatchedConicSolver solver = tools.getSolver();
+
+			GUILayout.BeginVertical();
+			if(solver.maneuverNodes.Count < 1) {
+				GUILayout.BeginHorizontal();
+				GUILayout.Label("No nodes to show.", GUILayout.Width(200));
+				GUILayout.EndHorizontal();
+			} else {
+				double d = 0.0;
+				double timeNow = Planetarium.GetUniversalTime();
+
+				GUILayout.BeginHorizontal();
+				GUILayout.Label("", GUILayout.Width(60));
+				GUILayout.Label("Δv", GUILayout.Width(90));
+				GUILayout.Label("Time Until", GUILayout.Width(150));
+				GUILayout.EndHorizontal();
+
+				foreach(ManeuverNode curNode in solver.maneuverNodes) {
+					int idx = solver.maneuverNodes.IndexOf(curNode);
+					double timeDiff = curNode.UT - timeNow;
+					GUILayout.BeginHorizontal();
+					GUILayout.Label("Node " + idx, GUILayout.Width(60));
+					GUILayout.Label(curNode.DeltaV.magnitude.ToString("F2") + "m/s", GUILayout.Width(90));
+					GUILayout.Label(tools.convertUTtoHumanDuration(timeDiff), GUILayout.Width(150));
+					GUILayout.EndHorizontal();
+					d += curNode.DeltaV.magnitude;
+				}
+
+				GUILayout.BeginHorizontal();
+				GUILayout.Label("", GUILayout.Width(60));
+				GUILayout.Label(d.ToString("F2") + "m/s", GUILayout.Width(90));
+				GUILayout.Label("", GUILayout.Width(150));
+				GUILayout.EndHorizontal();
+			}
+
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+		}
 
         /// <summary>
         /// Returns whether the Node Editor can be shown based on a number of global factors.
@@ -997,6 +1092,8 @@ namespace RegexKSP {
 					clockWindowPos.y = config.GetValue<int>("clockWindowY", Screen.height / 2);
 					conicsWindowPos.x = config.GetValue<int>("conicsWindowX", Screen.width / 5);
 					conicsWindowPos.y = config.GetValue<int>("conicsWindowY", Screen.height / 2);
+					tripWindowPos.x = config.GetValue<int>("tripWindowX", Screen.width / 5);
+					tripWindowPos.y = config.GetValue<int>("tripWindowY", Screen.height / 5);
 					showClock = config.GetValue<bool>("showClock", false);
 					showEAngle = config.GetValue<bool>("showEAngle", true);
 					showConicsAlways = config.GetValue<bool>("showConicsAlways", false);
@@ -1066,6 +1163,8 @@ namespace RegexKSP {
 			config["clockWindowY"] = (int)clockWindowPos.y;
 			config["conicsWindowX"] = (int)conicsWindowPos.x;
 			config["conicsWindowY"] = (int)conicsWindowPos.y;
+			config["tripWindowX"] = (int)tripWindowPos.x;
+			config["tripWindowY"] = (int)tripWindowPos.y;
 			config["showClock"] = showClock;
 			config["showEAngle"] = showEAngle;
 			config["showConicsAlways"] = showConicsAlways;
