@@ -76,13 +76,40 @@ namespace RegexKSP {
 		/// <returns>The converted time.</returns>
 		/// <param name="UT">Kerbal Spece Program Universal Time.</param>
 		public String convertUTtoHumanTime(double UT) {
-			long secs = (long)(UT % 60);
-			long mins = (long)((UT / 60) % 60);
-			long hour = (long)((UT / 3600) % 24);
-			long day = (long)((UT / 86400) % 365) + 1;  // Ensure we don't get a "Day 0" here.
-			long year = (long)(UT / (86400 * 365)) + 1; // Ensure we don't get a "Year 0" here.
+			long secs = (long)Math.Floor(UT % 60);
+			long mins = (long)Math.Floor((UT / 60) % 60);
+			long hour = (long)Math.Floor((UT / 3600) % 24);
+			long day = (long)Math.Floor((UT / 86400) % 365) + 1;  // Ensure we don't get a "Day 0" here.
+			long year = (long)Math.Floor(UT / (86400 * 365)) + 1; // Ensure we don't get a "Year 0" here.
 
 			return "Year " + year + " Day " + day + " " + hour + ":" + (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+		}
+
+		/// <summary>
+		/// Converts the UT to human-readable duration.
+		/// </summary>
+		/// <returns>The converted time.</returns>
+		/// <param name="UT">Kerbal Spece Program Universal Time.</param>
+		public String convertUTtoHumanDuration(double UT) {
+			double temp = Math.Floor(Math.Abs(UT % 60));
+			string retval = (long)temp + "s";
+			if(Math.Abs(UT / 60) > 1.0) {
+				temp = Math.Floor(Math.Abs((UT / 60) % 60));
+				retval = (long)temp + "m, " + retval;
+			}
+			if(Math.Abs(UT / 3600) > 1.0) {
+				temp = Math.Floor(Math.Abs((UT / 3600) % 24));
+				retval = (long)temp + "h, " + retval;
+			}
+			if(Math.Abs(UT / 86400) > 1.0) {
+				temp = Math.Floor(Math.Abs((UT / 86400) % 365));
+				retval = ((long)temp + 1) + "d, " + retval;
+			}
+			if(Math.Abs(UT / (86400 * 365)) > 1.0) {
+				temp = Math.Floor(Math.Abs(UT / (86400 * 365)));
+				retval = ((long)temp + 1) + "y, " + retval;
+			}
+			return retval;
 		}
 
 		/// <summary>
@@ -100,15 +127,15 @@ namespace RegexKSP {
 		/// <returns>The string format, in meters.</returns>
 		/// <param name="d">The double to format</param>
 		public string formatMeters(double d) {
-			if(Math.abs(d / 1000000.0) > 1) {
+			if(Math.Abs(d / 1000000.0) > 1) {
 				// format as kilometers.
-				return (d/1000.0).ToString("F2") + "km";
+				return (d/1000.0).ToString("0.##") + "km";
 			} else {
 				// use meters
-				if(Math.abs(d) > 100000.0) {
-					return d.ToString("D") + "m";
+				if(Math.Abs(d) > 100000.0) {
+					return d.ToString("F0") + "m";
 				} else {
-					return d.ToString("F2") + "m";
+					return d.ToString("0.##") + "m";
 				}
 			}
 		}
