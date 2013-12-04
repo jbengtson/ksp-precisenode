@@ -181,6 +181,20 @@ namespace RegexKSP {
 
 		public Orbit findNextEncounter(ManeuverNode node) {
 			List<Orbit> plan = node.solver.flightPlan;
+			Orbit curOrbit = node.patch; // FlightGlobals.ActiveVessel.orbit;
+
+			for(int k = plan.IndexOf(node.patch); k < plan.Count; k++) {
+				Orbit o = plan[k];
+				if(curOrbit.referenceBody.name != o.referenceBody.name && o.referenceBody.name != "Sun") {
+					return o;
+				}
+			}
+			return null;
+		}
+
+		/*
+		public Orbit findNextEncounter(ManeuverNode node) {
+			List<Orbit> plan = node.solver.flightPlan;
 			Orbit curOrbit = FlightGlobals.ActiveVessel.orbit;
 			foreach(Orbit o in plan) {
 				if(curOrbit.referenceBody.name != o.referenceBody.name && o.referenceBody.name != "Sun") {
@@ -189,6 +203,7 @@ namespace RegexKSP {
 			}
 			return null;
 		}
+		*/
 		
 		/// <summary>
 		/// Function to figure out which KeyCode was pressed.
