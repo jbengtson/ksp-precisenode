@@ -228,7 +228,10 @@ namespace RegexKSP {
 						return;
 					}
 				}
-				GUILayout.Label("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1), GUILayout.Width(100));
+				if(GUILayout.Button("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1))) {
+					MapView.MapCamera.SetTarget(node.scaledSpaceTarget);
+				}
+				// GUILayout.Label("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1), GUILayout.Width(100));
 				if(GUILayout.Button(">")) {
 					int count = solver.maneuverNodes.Count;
 					if(count > 1) {
@@ -323,7 +326,10 @@ namespace RegexKSP {
 
 			if(showUTControls) {
 				GUILayout.BeginHorizontal();
-				GUILayout.Label("", GUILayout.Width(100));
+				GUI.backgroundColor = Color.yellow;
+				if(GUILayout.Button("Peri")) {
+					convertedTime = Planetarium.GetUniversalTime() + node.patch.timeToPe;
+				}
 				GUI.backgroundColor = Color.magenta;
 				if(GUILayout.Button("-10K")) {
 					convertedTime -= 10000;
@@ -339,6 +345,10 @@ namespace RegexKSP {
 				GUI.backgroundColor = Color.cyan;
 				if(GUILayout.Button("+10K")) {
 					convertedTime += 10000;
+				}
+				GUI.backgroundColor = Color.blue;
+				if(GUILayout.Button("Apo")) {
+					convertedTime = Planetarium.GetUniversalTime() + node.patch.timeToAp;
 				}
 				GUI.backgroundColor = defaultColor;
 				GUILayout.EndHorizontal();
@@ -426,17 +436,18 @@ namespace RegexKSP {
 				// Find the next encounter, if any, in our flight plan.
 				Orbit nextEnc = tools.findNextEncounter(node);
 				if(nextEnc == null) {
-					List<Orbit> plan = node.solver.flightPlan;
-					if(plan.Count > 1) {
+					if(node.solver.flightPlan.Count > 1) {
 						// output the apoapsis and periapsis of our projected orbit.
 						GUILayout.BeginHorizontal();
 						GUILayout.Label("Apoapsis:", GUILayout.Width(100));
-						GUILayout.Label(tools.formatMeters(plan[1].ApA), GUILayout.Width(100));
+						// GUILayout.Label(tools.formatMeters(plan[1].ApA), GUILayout.Width(100));
+						GUILayout.Label(tools.formatMeters(node.patch.ApA), GUILayout.Width(100));
 						GUILayout.EndHorizontal();
 
 						GUILayout.BeginHorizontal();
 						GUILayout.Label("Periapsis:", GUILayout.Width(100));
-						GUILayout.Label(tools.formatMeters(plan[1].PeA), GUILayout.Width(100));
+						// GUILayout.Label(tools.formatMeters(plan[1].PeA), GUILayout.Width(100));
+						GUILayout.Label(tools.formatMeters(node.patch.PeA), GUILayout.Width(100));
 						GUILayout.EndHorizontal();
 					}
 				} else {
@@ -892,7 +903,7 @@ namespace RegexKSP {
         /// <value><c>true</c> if the Clock Window can be shown; otherwise, <c>false</c>.</value>
 		private bool canShowClock {
 			get {
-				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && showClock;
+				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && RenderingManager.fetch.enabled && showClock;
 			}
 		}
 
@@ -1189,5 +1200,19 @@ namespace RegexKSP {
             HIDEWINDOW,
             ADDWIDGET
         };
+
+		private enum DISPLAYS {
+			SHOWOPTIONS,
+			SHOWKEYMAPPER,
+			SHOWMANEUVERPAGER,
+			SHOWCONICSALWAYS,
+			SHOWCLOCK,
+			SHOWTRIP,
+			SHOWUTCONTROLS,
+			SHOWEANGLE,
+			SHOWORBITINFO,
+			SHOWNEXTENCOUNTER,
+			HASNODE
+		};
 	}	
 }
