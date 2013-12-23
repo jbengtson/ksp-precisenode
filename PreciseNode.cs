@@ -36,18 +36,17 @@ namespace RegexKSP {
 	public class PreciseNode : MonoBehaviour {
 		public PluginConfiguration config;
 		private PNOptions options = new PNOptions();
-		private PreciseNodeState curState = new PreciseNodeState();
+		private NodeManager curState = new NodeManager();
 
 		private bool configLoaded = false;
 		private bool conicsLoaded = false;
 		private bool shown = true;
+		private bool showTimeNext = false;
 		private bool waitForKey = false;
 		private bool showOptions = false;
 		private bool showKeymapper = false;
 		private byte currentWaitKey = 255;
-		private int conicsMode = 3;
 		private double keyWaitTime = 0.0;
-		private double increment = 1.0;
 
 		/// <summary>
 		/// Overridden function from MonoBehavior
@@ -68,8 +67,25 @@ namespace RegexKSP {
 		/// Overridden function from MonoBehavior
 		/// </summary>
 		public void Update() {
-			if(canShowNodeEditor) {
-				processKeyInput();
+			if(!FlightDriver.Pause) {
+				if(canShowNodeEditor) {
+					processKeyInput();
+				}/*
+				PatchedConicSolver solver = NodeTools.getSolver();
+				if(solver.maneuverNodes.Count > 0) {
+					if(!curState.hasNode() || !solver.maneuverNodes.Contains(curState.node)) {
+						// get the first one if we can't find the current or it's null
+						curState = new PreciseNodeState(solver.maneuverNodes[0]);
+					} else if(curState.hasNode()) {
+						curState.updateNode();
+						curState = curState.nextState();
+					}
+				} else {
+					if(curState.hasNode()) {
+						curState = new PreciseNodeState();
+						curState.resizeClockWindow = true;
+					}
+				}*/
 			}
 		}
 
@@ -77,33 +93,6 @@ namespace RegexKSP {
 		/// Overridden function from MonoBehavior
 		/// </summary>
 		public void OnGUI() {
-			/*
-			if(Event.current.type == EventType.Layout) {
-				// On layout we should see if we have nodes to act on.
-				PatchedConicSolver solver = NodeTools.getSolver();
-				if(solver.maneuverNodes.Count > 0) {
-					if(curState.node == null || !solver.maneuverNodes.Contains(curState.node)) {
-						// get the first one if we can't find the current or it's null
-						curState = new PreciseNodeState(solver.maneuverNodes[0]);
-						options.clockWindowPos.height = 65;
-					} else if(curState.node != null) {
-						curState.updateNode();
-						if(curState.resizeMainWindow) {
-							options.mainWindowPos.height = 250;
-						}
-						if(curState.resizeClockWindow) {
-							options.clockWindowPos.height = 65;
-						}
-						curState = curState.nextState();
-					}
-				} else {
-					if(curState.node != null) {
-						curState = new PreciseNodeState();
-						curState.resizeClockWindow = true;
-					}
-				}
-			}
-			*/
 			if(Event.current.type == EventType.Layout) {
 				// On layout we should see if we have nodes to act on.
 				if(curState.resizeMainWindow) {
@@ -112,10 +101,13 @@ namespace RegexKSP {
 				if(curState.resizeClockWindow) {
 					options.clockWindowPos.height = 65;
 				}
+				// this prevents the clock window from showing the time to
+				// next node when the next state is created during repaint.
+				showTimeNext = curState.hasNode();
 			}
 			if(canShowNodeEditor) {
 				if(!conicsLoaded) {
-					NodeTools.changeConicsMode(conicsMode);
+					NodeTools.changeConicsMode(options.conicsMode);
 					conicsLoaded = true;
 				}
 				if(shown) {
@@ -129,20 +121,21 @@ namespace RegexKSP {
 			if(canShowClock) {
 				drawClockGUI();
 			}
-			if(Event.current.type == EventType.Repaint) {
+			if(Event.current.type == EventType.Repaint && !FlightDriver.Pause) {
 				// On layout we should see if we have nodes to act on.
+
 				PatchedConicSolver solver = NodeTools.getSolver();
 				if(solver.maneuverNodes.Count > 0) {
 					if(!curState.hasNode() || !solver.maneuverNodes.Contains(curState.node)) {
 						// get the first one if we can't find the current or it's null
-						curState = new PreciseNodeState(solver.maneuverNodes[0]);
+						curState = new NodeManager(solver.maneuverNodes[0]);
 					} else if(curState.hasNode()) {
 						curState.updateNode();
 						curState = curState.nextState();
 					}
 				} else {
 					if(curState.hasNode()) {
-						curState = new PreciseNodeState();
+						curState = new NodeManager();
 						curState.resizeClockWindow = true;
 					}
 				}
@@ -188,18 +181,15 @@ namespace RegexKSP {
 		/// <param name="id">Identifier.</param>
 		public void drawMainWindow(int id) {
 			Color defaultColor = GUI.backgroundColor;
+			Color contentColor = GUI.contentColor;
+			Color curColor = defaultColor;
 			PatchedConicSolver solver = NodeTools.getSolver();
+			String check = "";
 
-			String timeHuman = NodeTools.convertUTtoHumanTime(curState.node.UT);
 			String timeUT = curState.node.UT.ToString("0.##");
 			String prograde = curState.node.DeltaV.z.ToString("0.##") + "m/s";
 			String normal = curState.node.DeltaV.y.ToString("0.##") + "m/s";
 			String radial = curState.node.DeltaV.x.ToString("0.##") + "m/s";
-			String eangle = "n/a";
-
-			if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
-				eangle = NodeTools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, curState.node.UT).ToString("0.##") + "°";
-			}
 
 			// Options button
 			if(GUI.Button(new Rect(options.mainWindowPos.width - 48, 2, 22, 18), "O")) {
@@ -213,196 +203,105 @@ namespace RegexKSP {
 			GUILayout.BeginVertical();
 
 			if(options.showManeuverPager) {
-				// Maneuver node paging controls
-				GUILayout.BeginHorizontal();
-				if(GUILayout.Button("<")) {
-					int count = solver.maneuverNodes.Count;
-					if(count > 1) {
-						// get the previous or last node
-						int idx = solver.maneuverNodes.IndexOf(curState.node);
-						if(idx == 0) {
-							curState.nextNode = solver.maneuverNodes[--count];
-						} else {
-							curState.nextNode = solver.maneuverNodes[--idx];
-						}
-					}
-				}
-				if(GUILayout.Button("Editing Node " + (solver.maneuverNodes.IndexOf(curState.node) + 1))) {
-					MapView.MapCamera.SetTarget(curState.node.scaledSpaceTarget);
-				}
-				// GUILayout.Label("Editing Node " + (solver.maneuverNodes.IndexOf(node) + 1), GUILayout.Width(100));
-				if(GUILayout.Button(">")) {
-					int count = solver.maneuverNodes.Count;
-					if(count > 1) {
-						// get the previous or last node
-						int idx = solver.maneuverNodes.IndexOf(curState.node);
-						if(idx == count - 1) {
-							curState.nextNode = solver.maneuverNodes[0];
-						} else {
-							curState.nextNode = solver.maneuverNodes[++idx];
-						}
-					}
-				}
-				GUILayout.EndHorizontal();
+				GUIParts.drawManeuverPager(curState);
 			}
 
 			// Human-readable time
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("Time:", GUILayout.Width(100));
-			GUILayout.Label(timeHuman, GUILayout.Width(130));
-			GUILayout.EndHorizontal();
+			GUIParts.drawDoubleLabel("Time:", 100, NodeTools.convertUTtoHumanTime(curState.node.UT), 130);
 
 			// Increment buttons
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Increment:", GUILayout.Width(100));
-			if(increment == 0.01) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("0.01")) {
-				increment = 0.01;
-			}
-			GUI.backgroundColor = defaultColor;
-			if(increment == 0.1) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("0.1")) {
-				increment = 0.1;
-			}
-			GUI.backgroundColor = defaultColor;
-			if(increment == 1) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("1")) {
-				increment = 1;
-			}
-			GUI.backgroundColor = defaultColor;
-			if(increment == 10) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("10")) {
-				increment = 10;
-			}
-			GUI.backgroundColor = defaultColor;
-			if(increment == 100) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("100")) {
-				increment = 100;
-			}
-			GUI.backgroundColor = defaultColor;
+			GUIParts.drawButton("0.01", (options.increment == 0.01?Color.yellow:defaultColor), delegate() { options.increment = 0.01; });
+			GUIParts.drawButton("0.1", (options.increment == 0.1?Color.yellow:defaultColor), delegate() { options.increment = 0.1; });
+			GUIParts.drawButton("1", (options.increment == 1?Color.yellow:defaultColor), delegate() { options.increment = 1; });
+			GUIParts.drawButton("10", (options.increment == 10?Color.yellow:defaultColor), delegate() { options.increment = 10; });
+			GUIParts.drawButton("100", (options.increment == 100?Color.yellow:defaultColor), delegate() { options.increment = 100; });
 			GUILayout.EndHorizontal();
 
 			// Universal time controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("UT:", GUILayout.Width(100));
 			GUI.backgroundColor = Color.green;
-			String check = GUILayout.TextField(curState.lastUT.ToString(), GUILayout.Width(100));
-			curState.setUT(check);
-
-			GUI.backgroundColor = Color.red;
-			if(GUILayout.Button("-")) {
-				curState.addUT(increment * -1.0);
+			if(!curState.timeParsed) {
+				GUI.contentColor = Color.red;
 			}
-			GUI.backgroundColor = Color.green;
-			if(GUILayout.Button("+")) {
-				curState.addUT(increment);
+			check = GUILayout.TextField(curState.timeText, GUILayout.Width(100));
+			if(!curState.timeText.Equals(check, StringComparison.Ordinal)) {
+				curState.setUT(check);
 			}
-			GUI.backgroundColor = defaultColor;
+			GUI.contentColor = contentColor;
+			GUIParts.drawButton("-", Color.red, delegate() { curState.addUT(options.increment * -1.0); });
+			GUIParts.drawButton("+", Color.green, delegate() { curState.addUT(options.increment); });
 			GUILayout.EndHorizontal();
 
+			// extended time controls
 			if(options.showUTControls) {
 				GUILayout.BeginHorizontal();
-				GUI.backgroundColor = Color.yellow;
-				if(GUILayout.Button("Peri")) {
-					curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToPe);
-				}
-				GUI.backgroundColor = Color.magenta;
-				if(GUILayout.Button("-10K")) {
-					curState.addUT(-10000);
-				}
-				GUI.backgroundColor = Color.red;
-				if(GUILayout.Button("-1K")) {
-					curState.addUT(-1000);
-				}
-				GUI.backgroundColor = Color.green;
-				if(GUILayout.Button("+1K")) {
-					curState.addUT(1000);
-				}
-				GUI.backgroundColor = Color.cyan;
-				if(GUILayout.Button("+10K")) {
-					curState.addUT(10000);
-				}
-				GUI.backgroundColor = Color.blue;
-				if(GUILayout.Button("Apo")) {
-					curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToAp);
-				}
-				GUI.backgroundColor = defaultColor;
+				GUIParts.drawButton("Peri", Color.yellow, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToPe); });
+				GUIParts.drawButton("-10K", Color.magenta, delegate() { curState.addUT(-10000); });
+				GUIParts.drawButton("-1K", Color.red, delegate() { curState.addUT(-1000); });
+				GUIParts.drawButton("+1K", Color.green, delegate() { curState.addUT(1000); });
+				GUIParts.drawButton("+10K", Color.cyan, delegate() { curState.addUT(10000); });
+				GUIParts.drawButton("Apo", Color.blue, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToAp); });
 				GUILayout.EndHorizontal();
 			}
 
 			// Prograde controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Prograde:", GUILayout.Width(100));
-			check = GUILayout.TextField(curState.deltaV.z.ToString(), GUILayout.Width(100));
-			curState.setPrograde(check);
-			// GUILayout.Label(prograde, GUILayout.Width(100));
-			GUI.backgroundColor = Color.red;
-			if(GUILayout.Button("-")) {
-				curState.addPrograde(increment * -1.0);
+			if(!curState.progradeParsed) {
+				GUI.contentColor = Color.red;
 			}
-			GUI.backgroundColor = Color.green;
-			if(GUILayout.Button("+")) {
-				curState.addPrograde(increment);
+			check = GUILayout.TextField(curState.progradeText, GUILayout.Width(100));
+			if(!curState.progradeText.Equals(check, StringComparison.Ordinal)) {
+				curState.setPrograde(check);
 			}
-			GUI.backgroundColor = defaultColor;
+			GUI.contentColor = contentColor;
+			GUIParts.drawButton("-", Color.red, delegate() { curState.addPrograde(options.increment * -1.0); });
+			GUIParts.drawButton("+", Color.green, delegate() { curState.addPrograde(options.increment); });
 			GUILayout.EndHorizontal();
 
 			// Normal controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Normal:", GUILayout.Width(100));
-			check = GUILayout.TextField(curState.deltaV.y.ToString(), GUILayout.Width(100));
-			curState.setNormal(check);
-			// GUILayout.Label(normal, GUILayout.Width(100));
-			GUI.backgroundColor = Color.red;
-			if(GUILayout.Button("-")) {
-				curState.addNormal(increment * -1.0);
+			if(!curState.normalParsed) {
+				GUI.contentColor = Color.red;
 			}
-			GUI.backgroundColor = Color.green;
-			if(GUILayout.Button("+")) {
-				curState.addNormal(increment);
+			check = GUILayout.TextField(curState.normalText, GUILayout.Width(100));
+			if(!curState.normalText.Equals(check, StringComparison.Ordinal)) {
+				curState.setNormal(check);
 			}
-			GUI.backgroundColor = defaultColor;
+			GUI.contentColor = contentColor;
+			GUIParts.drawButton("-", Color.red, delegate() { curState.addNormal(options.increment * -1.0); });
+			GUIParts.drawButton("+", Color.green, delegate() { curState.addNormal(options.increment); });
 			GUILayout.EndHorizontal();
 
 			// radial controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Radial:", GUILayout.Width(100));
-			check = GUILayout.TextField(curState.deltaV.x.ToString(), GUILayout.Width(100));
-			curState.setRadial(check);
-			// GUILayout.Label(radial, GUILayout.Width(100));
-			GUI.backgroundColor = Color.red;
-			if(GUILayout.Button("-")) {
-				curState.addRadial(increment * -1.0);
+			if(!curState.radialParsed) {
+				GUI.contentColor = Color.red;
 			}
-			GUI.backgroundColor = Color.green;
-			if(GUILayout.Button("+")) {
-				curState.addRadial(increment);
+			check = GUILayout.TextField(curState.radialText, GUILayout.Width(100));
+			if(!curState.radialText.Equals(check, StringComparison.Ordinal)) {
+				curState.setRadial(check);
 			}
-			GUI.backgroundColor = defaultColor;
+			GUI.contentColor = contentColor;
+			GUIParts.drawButton("-", Color.red, delegate() { curState.addRadial(options.increment * -1.0); });
+			GUIParts.drawButton("+", Color.green, delegate() { curState.addRadial(options.increment); });
 			GUILayout.EndHorizontal();
 
 			// total delta-V display
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("Total delta-V:",GUILayout.Width(100));
-			GUILayout.Label(curState.node.DeltaV.magnitude.ToString("0.##") + "m/s");
-			GUILayout.EndHorizontal();
+			GUIParts.drawDoubleLabel("Total delta-V:", 100, curState.node.DeltaV.magnitude.ToString("0.##") + "m/s", 130);
 
 			// Ejection angle
 			if(options.showEAngle) {
-				GUILayout.BeginHorizontal();
-				GUILayout.Label("Ejection Angle:", GUILayout.Width(100));
-				GUILayout.Label(eangle, GUILayout.Width(100));
-				GUILayout.EndHorizontal();
+				String eangle = "n/a";
+				if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
+					eangle = NodeTools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, curState.node.UT).ToString("0.##") + "°";
+				}
+				GUIParts.drawDoubleLabel("Ejection Angle:", 100, eangle, 130);
 			}
 
 			// Additional Information
@@ -411,32 +310,17 @@ namespace RegexKSP {
 				if(curState.encounter) {
 					Orbit nextEnc = NodeTools.findNextEncounter(curState.node);
 					// Next encounter periapsis
-					GUILayout.BeginHorizontal();
-					GUILayout.Label("(" + nextEnc.referenceBody.name + ") Pe:", GUILayout.Width(100));
-					GUILayout.Label(NodeTools.formatMeters(nextEnc.PeA), GUILayout.Width(100));
-					GUILayout.EndHorizontal();
-					GUILayout.BeginHorizontal();
+					GUIParts.drawDoubleLabel("(" + nextEnc.referenceBody.name + ") Pe:", 100, NodeTools.formatMeters(nextEnc.PeA), 130);
 
-					GUI.backgroundColor = defaultColor;
+					GUILayout.BeginHorizontal();
 					GUILayout.Label("", GUILayout.Width(100));
-					if(GUILayout.Button("Focus on " + nextEnc.referenceBody.name)) {
-						MapView.MapCamera.SetTarget(nextEnc.referenceBody.name);
-					}
+					GUIParts.drawButton("Focus on " + nextEnc.referenceBody.name, defaultColor, delegate() { MapView.MapCamera.SetTarget(nextEnc.referenceBody.name); });
 					GUILayout.EndHorizontal();
 				} else {
 					if(curState.node.solver.flightPlan.Count > 1) {
 						// output the apoapsis and periapsis of our projected orbit.
-						GUILayout.BeginHorizontal();
-						GUILayout.Label("Apoapsis:", GUILayout.Width(100));
-						// GUILayout.Label(tools.formatMeters(plan[1].ApA), GUILayout.Width(100));
-						GUILayout.Label(NodeTools.formatMeters(curState.node.nextPatch.ApA), GUILayout.Width(100));
-						GUILayout.EndHorizontal();
-
-						GUILayout.BeginHorizontal();
-						GUILayout.Label("Periapsis:", GUILayout.Width(100));
-						// GUILayout.Label(tools.formatMeters(plan[1].PeA), GUILayout.Width(100));
-						GUILayout.Label(NodeTools.formatMeters(curState.node.nextPatch.PeA), GUILayout.Width(100));
-						GUILayout.EndHorizontal();
+						GUIParts.drawDoubleLabel("Apoapsis:", 100, NodeTools.formatMeters(curState.node.nextPatch.ApA), 100);
+						GUIParts.drawDoubleLabel("Periapsis:", 100, NodeTools.formatMeters(curState.node.nextPatch.PeA), 130);
 					}
 				}
 			}
@@ -444,74 +328,24 @@ namespace RegexKSP {
 			// Conics mode controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
-			if(conicsMode == 0) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("0")) {
-				conicsMode = 0;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 1) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("1")) {
-				conicsMode = 1;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 2) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("2")) {
-				conicsMode = 2;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 3) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("3")) {
-				conicsMode = 3;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 4) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("4")) {
-				conicsMode = 4;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
+			GUIParts.drawButton("0", (options.conicsMode == 0?Color.yellow:defaultColor), delegate() { options.setConicsMode(0); });
+			GUIParts.drawButton("1", (options.conicsMode == 1?Color.yellow:defaultColor), delegate() { options.setConicsMode(1); });
+			GUIParts.drawButton("2", (options.conicsMode == 2?Color.yellow:defaultColor), delegate() { options.setConicsMode(2); });
+			GUIParts.drawButton("3", (options.conicsMode == 3?Color.yellow:defaultColor), delegate() { options.setConicsMode(3); });
+			GUIParts.drawButton("4", (options.conicsMode == 4?Color.yellow:defaultColor), delegate() { options.setConicsMode(4); });
 			GUILayout.EndHorizontal();
 
 			// conics patch limit editor.
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Change Conics Samples", GUILayout.Width(200));
-			GUI.backgroundColor = Color.red;
-			if(GUILayout.Button("-")) {
-				solver.DecreasePatchLimit();
-			}
-			GUI.backgroundColor = Color.green;
-			if(GUILayout.Button("+")) {
-				solver.IncreasePatchLimit();
-			}
-			GUI.backgroundColor = defaultColor;
+			GUIParts.drawButton("-", Color.red, delegate() { solver.DecreasePatchLimit(); });
+			GUIParts.drawButton("+", Color.red, delegate() { solver.IncreasePatchLimit(); });
 			GUILayout.EndHorizontal();
 
-			// trip info button
+			// trip info button and vessel focus buttons
 			GUILayout.BeginHorizontal();
-			if(options.showTrip) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("Trip Info")) {
-				options.showTrip = !options.showTrip;
-			}
-			GUI.backgroundColor = defaultColor;
-			if(GUILayout.Button("Focus on Vessel")) {
-				MapView.MapCamera.SetTarget(FlightGlobals.ActiveVessel.vesselName);
-			}
+			GUIParts.drawButton("Trip Info", (options.showTrip?Color.yellow:defaultColor), delegate() { options.showTrip = !options.showTrip; });
+			GUIParts.drawButton("Focus on Vessel", defaultColor, delegate() { MapView.MapCamera.SetTarget(FlightGlobals.ActiveVessel.vesselName); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.EndVertical();
@@ -530,28 +364,23 @@ namespace RegexKSP {
 
 			GUILayout.BeginVertical();
 
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("Time:", GUILayout.Width(35));
-			GUILayout.Label(timeHuman, GUILayout.Width(150));
-			GUILayout.EndHorizontal();
+			GUIParts.drawDoubleLabel("Time:", 35, timeHuman, 150);
+			GUIParts.drawDoubleLabel("UT:", 35, Math.Floor(timeNow).ToString("F0"), 150);
 
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("UT:", GUILayout.Width(35));
-			GUILayout.Label(Math.Floor(timeNow).ToString("F0"), GUILayout.Width(150));
-			GUILayout.EndHorizontal();
-
-			if(curState.hasNode() && NodeTools.getSolver().maneuverNodes.Count > 0) {
-				double next = timeNow - NodeTools.getSolver().maneuverNodes[0].UT;
-				GUILayout.BeginHorizontal();
-				GUILayout.Label("Next:", GUILayout.Width(35));
+			if(showTimeNext) {
+				double next = 0.0;
 				string labelText = "";
+				if(NodeTools.getSolver().maneuverNodes.Count > 0) {
+					// protection from index out of range errors.
+					// should probably handle this better.
+					next = timeNow - NodeTools.getSolver().maneuverNodes[0].UT;
+				}
 				if(next < 0) {
 					labelText = "T- " + NodeTools.convertUTtoHumanDuration(next);
 				} else {
 					labelText = "T+ " + NodeTools.convertUTtoHumanDuration(next);
 				}
-				GUILayout.Label(labelText, GUILayout.Width(150));
-				GUILayout.EndHorizontal();
+				GUIParts.drawDoubleLabel("Next:", 35, labelText, 150);
 			}
 
 			GUILayout.EndVertical();
@@ -571,60 +400,18 @@ namespace RegexKSP {
 			// Conics mode controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
-			if(conicsMode == 0) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("0")) {
-				conicsMode = 0;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 1) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("1")) {
-				conicsMode = 1;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 2) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("2")) {
-				conicsMode = 2;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 3) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("3")) {
-				conicsMode = 3;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
-			if(conicsMode == 4) {
-				GUI.backgroundColor = Color.yellow;
-			}
-			if(GUILayout.Button("4")) {
-				conicsMode = 4;
-				NodeTools.changeConicsMode(conicsMode);
-			}
-			GUI.backgroundColor = defaultColor;
+			GUIParts.drawButton("0", (options.conicsMode == 0?Color.yellow:defaultColor), delegate() { options.setConicsMode(0); });
+			GUIParts.drawButton("1", (options.conicsMode == 1?Color.yellow:defaultColor), delegate() { options.setConicsMode(1); });
+			GUIParts.drawButton("2", (options.conicsMode == 2?Color.yellow:defaultColor), delegate() { options.setConicsMode(2); });
+			GUIParts.drawButton("3", (options.conicsMode == 3?Color.yellow:defaultColor), delegate() { options.setConicsMode(3); });
+			GUIParts.drawButton("4", (options.conicsMode == 4?Color.yellow:defaultColor), delegate() { options.setConicsMode(4); });
 			GUILayout.EndHorizontal();
 
 			// conics patch limit editor.
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Change Conics Samples", GUILayout.Width(200));
-			GUI.backgroundColor = Color.red;
-			if(GUILayout.Button("-")) {
-				solver.DecreasePatchLimit();
-			}
-			GUI.backgroundColor = Color.green;
-			if(GUILayout.Button("+")) {
-				solver.IncreasePatchLimit();
-			}
-			GUI.backgroundColor = defaultColor;
+			GUIParts.drawButton("-", Color.red, delegate() { solver.DecreasePatchLimit(); });
+			GUIParts.drawButton("+", Color.red, delegate() { solver.IncreasePatchLimit(); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.EndVertical();
@@ -688,128 +475,68 @@ namespace RegexKSP {
 			// Set window control
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Hide/Show Window: " + options.hideWindow.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Hide/Show Window...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.HIDEWINDOW;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Hide/Show Window...", (byte)KEYS.HIDEWINDOW); });
 			GUILayout.EndHorizontal();
 
 			// Set add node widget button
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Open Node Gizmo: " + options.addWidget.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Open Node Gizmo...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.ADDWIDGET;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Open Node Gizmo...", (byte)KEYS.ADDWIDGET); });
 			GUILayout.EndHorizontal();
 
 			// Set prograde controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Increment Prograde: " + options.progInc.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Increment Prograde...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.PROGINC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Increment Prograde...", (byte)KEYS.PROGINC); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Decrement Prograde: " + options.progDec.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Decrement Prograde...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.PROGDEC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Decrement Prograde...", (byte)KEYS.PROGDEC); });
 			GUILayout.EndHorizontal();
 
 			// set normal controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Increment Normal: " + options.normInc.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Increment Normal...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.NORMINC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Increment Normal...", (byte)KEYS.NORMINC); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Decrement Normal: " + options.normDec.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Decrement Normal...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.NORMDEC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Decrement Normal...", (byte)KEYS.NORMDEC); });
 			GUILayout.EndHorizontal();
 
 			// set radial controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Increment Radial: " + options.radiInc.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Increment Radial...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.RADIINC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Increment Radial...", (byte)KEYS.RADIINC); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Decrement Radial: " + options.radiDec.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Decrement Radial...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.RADIDEC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Decrement Radial...", (byte)KEYS.RADIDEC); });
 			GUILayout.EndHorizontal();
 
 			// set time controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Increment Time: " + options.timeInc.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Increment Time...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.TIMEINC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Increment Time...", (byte)KEYS.TIMEINC); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Decrement Time: " + options.timeDec.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Decrement Time...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.TIMEDEC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Decrement Time...", (byte)KEYS.TIMEDEC); });
 			GUILayout.EndHorizontal();
 
 			// set paging controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Page Increment: " + options.pageIncrement.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Page Increment...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.PAGEINC;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Page Increment...", (byte)KEYS.PAGEINC); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Page Conics: " + options.pageConics.ToString(), GUILayout.Width(200));
-			if(GUILayout.Button("set")) {
-				ScreenMessages.PostScreenMessage("Press a key to bind Page Conics Mode...", 5.0f, ScreenMessageStyle.UPPER_CENTER);
-				waitForKey = true;
-				currentWaitKey = (byte)KEYS.PAGECON;
-				keyWaitTime = Planetarium.GetUniversalTime();
-			}
+			GUIParts.drawButton("set", defaultColor, delegate() { doWaitForKey("Press a key to bind Page Conics Mode...", (byte)KEYS.PAGECON); });
 			GUILayout.EndHorizontal();
 
 			GUILayout.EndVertical();
@@ -846,7 +573,7 @@ namespace RegexKSP {
 				}
 
 				GUILayout.BeginHorizontal();
-				GUILayout.Label("", GUILayout.Width(60));
+				GUILayout.Label("Total", GUILayout.Width(60));
 				GUILayout.Label(total.ToString("F2") + "m/s", GUILayout.Width(90));
 				GUILayout.Label("", GUILayout.Width(150));
 				GUILayout.EndHorizontal();
@@ -884,6 +611,14 @@ namespace RegexKSP {
 			get {
 				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && RenderingManager.fetch.enabled && options.showClock;
 			}
+		}
+
+
+		private void doWaitForKey(String msg, byte key) {
+			ScreenMessages.PostScreenMessage(msg, 5.0f, ScreenMessageStyle.UPPER_CENTER);
+			waitForKey = true;
+			currentWaitKey = key;
+			keyWaitTime = Planetarium.GetUniversalTime();
 		}
 
 		/// <summary>
@@ -952,79 +687,46 @@ namespace RegexKSP {
 			// change increment
 			if(Input.GetKeyDown(options.pageIncrement)) {
 				if(Event.current.alt) {
-					// change increment
-					if(increment == 0.01) {
-						increment = 100;
-					} else if(increment == 0.1) {
-						increment = 0.01;
-					} else if(increment == 1) {
-						increment = 0.1;
-					} else if(increment == 10) {
-						increment = 1;
-					} else if(increment == 100) {
-						increment = 10;
-					} else {
-						increment = 1;
-					}
+					options.downIncrement();
 				} else {
-					// change increment
-					if(increment == 0.01) {
-						increment = 0.1;
-					} else if(increment == 0.1) {
-						increment = 1;
-					} else if(increment == 1) {
-						increment = 10;
-					} else if(increment == 10) {
-						increment = 100;
-					} else if(increment == 100) {
-						increment = 0.01;
-					} else {
-						increment = 1;
-					}
+					options.upIncrement();
 				}
 			}
 			// prograde increment
 			if(Input.GetKeyDown(options.progInc)) {
-				curState.addPrograde(increment);
+				curState.addPrograde(options.increment);
 			}
 			// prograde decrement
 			if(Input.GetKeyDown(options.progDec)) {
-				curState.addPrograde(increment * -1.0);
+				curState.addPrograde(options.increment * -1.0);
 			}
 			// normal increment
 			if(Input.GetKeyDown(options.normInc)) {
-				curState.addNormal(increment);
+				curState.addNormal(options.increment);
 			}
 			// normal decrement
 			if(Input.GetKeyDown(options.normDec)) {
-				curState.addNormal(increment * -1.0);
+				curState.addNormal(options.increment * -1.0);
 			}
 			// radial increment
 			if(Input.GetKeyDown(options.radiInc)) {
-				curState.addRadial(increment);
+				curState.addRadial(options.increment);
 			}
 			// radial decrement
 			if(Input.GetKeyDown(options.radiDec)) {
-				curState.addRadial(increment * -1.0);
+				curState.addRadial(options.increment * -1.0);
 			}
 			// UT increment
 			if(Input.GetKeyDown(options.timeInc)) {
-				curState.addUT(increment);
+				curState.addUT(options.increment);
 			}
 			// UT decrement
 			if(Input.GetKeyDown(options.timeDec)) {
-				curState.addUT(increment * -1.0);
+				curState.addUT(options.increment * -1.0);
 			}
 			// Page Conics
 			if(Input.GetKeyDown(options.pageConics)) {
-				if(conicsMode < 0) {
-					conicsMode = 0;
-				}
-				conicsMode++;
-				if(conicsMode > 4) {
-					conicsMode = 0;
-				}
-				NodeTools.changeConicsMode(conicsMode);
+				options.pageConicsMode();
 			}
 			// hide/show window
 			if(Input.GetKeyDown(options.hideWindow)) {
@@ -1047,7 +749,7 @@ namespace RegexKSP {
 				configLoaded = true;
 
 				try {
-					conicsMode = config.GetValue<int>("conicsMode", 3);
+					options.conicsMode = config.GetValue<int>("conicsMode", 3);
 					options.mainWindowPos.x = config.GetValue<int>("mainWindowX", Screen.width / 10);
 					options.mainWindowPos.y = config.GetValue<int>("mainWindowY", 20);
 					options.optionsWindowPos.x = config.GetValue<int>("optWindowX", Screen.width / 3);
@@ -1106,7 +808,7 @@ namespace RegexKSP {
 				config = KSP.IO.PluginConfiguration.CreateForType<PreciseNode>(null);
 			}
 
-			config["conicsMode"] = conicsMode;
+			config["conicsMode"] = options.conicsMode;
 			config["progInc"] = options.progInc.ToString();
 			config["progDec"] = options.progDec.ToString();
 			config["normInc"] = options.normInc.ToString();
