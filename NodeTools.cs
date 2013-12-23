@@ -191,19 +191,6 @@ namespace RegexKSP {
 			return null;
 		}
 
-		/*
-		public Orbit findNextEncounter(ManeuverNode node) {
-			List<Orbit> plan = node.solver.flightPlan;
-			Orbit curOrbit = FlightGlobals.ActiveVessel.orbit;
-			foreach(Orbit o in plan) {
-				if(curOrbit.referenceBody.name != o.referenceBody.name && o.referenceBody.name != "Sun") {
-					return o;
-				}
-			}
-			return null;
-		}
-		*/
-		
 		/// <summary>
 		/// Function to figure out which KeyCode was pressed.
 		/// </summary>
@@ -247,9 +234,61 @@ namespace RegexKSP {
 		public KeyCode pageConics = KeyCode.KeypadEnter;
 		public KeyCode hideWindow = KeyCode.P;
 		public KeyCode addWidget = KeyCode.O;
+		public double increment = 1.0;
+		public int conicsMode = 3;
+
+		public void downIncrement() {
+			if(increment == 0.01) {
+				increment = 0.1;
+			} else if(increment == 0.1) {
+				increment = 1;
+			} else if(increment == 1) {
+				increment = 10;
+			} else if(increment == 10) {
+				increment = 100;
+			} else if(increment == 100) {
+				increment = 0.01;
+			} else {
+				increment = 1;
+			}
+		}
+
+		public void upIncrement() {
+			if(increment == 0.01) {
+				increment = 100;
+			} else if(increment == 0.1) {
+				increment = 0.01;
+			} else if(increment == 1) {
+				increment = 0.1;
+			} else if(increment == 10) {
+				increment = 1;
+			} else if(increment == 100) {
+				increment = 10;
+			} else {
+				increment = 1;
+			}
+		}
+
+		public void setConicsMode(int mode) {
+			conicsMode = mode;
+			NodeTools.changeConicsMode(conicsMode);
+		}
+
+		public void pageConicsMode() {
+			conicsMode++;
+			if(conicsMode < 0 || conicsMode > 4) {
+				conicsMode = 0;
+			}
+			NodeTools.changeConicsMode(conicsMode);
+		}
 	}
 
-	public class PreciseNodeState {
+
+	// Node manager policy:
+	// if the manager has been changed from the last update manager snapshot, take the manager
+	// UNLESS
+	// if the node has been changed from the last update node snapshot, take the node
+	public class NodeManager {
 		public ManeuverNode node = null;
 		public ManeuverNode nextNode = null;
 		public Vector3d deltaV;
@@ -259,88 +298,132 @@ namespace RegexKSP {
 		public bool resizeMainWindow = false;
 		public bool resizeClockWindow = false;
 
-		public PreciseNodeState() {
+		public bool progradeParsed = true;
+		public bool radialParsed = true;
+		public bool normalParsed = true;
+		public bool timeParsed = true;
+		public string progradeText = "";
+		public string radialText = "";
+		public string normalText = "";
+		public string timeText = "";
+
+		public NodeManager() {
 			deltaV = new Vector3d();
 		}
 
-		public PreciseNodeState(ManeuverNode n) {
+		public NodeManager(ManeuverNode n) {
 			deltaV = new Vector3d(n.DeltaV.x, n.DeltaV.y, n.DeltaV.z);
 			lastUT = n.UT;
 			node = n;
+			progradeText = n.DeltaV.z.ToString();
+			normalText = n.DeltaV.y.ToString();
+			radialText = n.DeltaV.x.ToString();
+			timeText = lastUT.ToString();
 			if(NodeTools.findNextEncounter(n) != null) {
 				encounter = true;
 			}
 		}
 
-		public PreciseNodeState nextState() {
+		public NodeManager nextState() {
 			if(nextNode != null) {
-				return new PreciseNodeState(nextNode);
+				return new NodeManager(nextNode);
 			}
-			return new PreciseNodeState(node);
+			if(NodeTools.findNextEncounter(node) != null) {
+				encounter = true;
+			}
+			return this;
 		}
 
 		public void addPrograde(double d) {
 			deltaV.z += d;
+			progradeText = deltaV.z.ToString();
 			changed = true;
 		}
 
 		public void setPrograde(String s) {
 			double d;
-			if(double.TryParse(s, out d)) {
-				if(d != deltaV.z) {
-					deltaV.z = d;
-					changed = true;
-				}
+			progradeText = s;
+			if(s.EndsWith(".")) {
+				progradeParsed = false;
+				return;
+			}
+			progradeParsed = double.TryParse(progradeText, out d);
+			if(progradeParsed) {
+				progradeText = d.ToString();
+				deltaV.z = d;
+				changed = true;
 			}
 		}
 
 		public void addNormal(double d) {
 			deltaV.y += d;
+			normalText = deltaV.y.ToString();
 			changed = true;
 		}
 
 		public void setNormal(String s) {
+			if(normalText.Equals(s, StringComparison.Ordinal)) { return; }
 			double d;
-			if(double.TryParse(s, out d)) {
-				if(d != deltaV.y) {
-					deltaV.y = d;
-					changed = true;
-				}
+			normalText = s;
+			if(s.EndsWith(".")) {
+				normalParsed = false;
+				return;
+			}
+			normalParsed = double.TryParse(normalText, out d);
+			if(normalParsed) {
+				normalText = d.ToString();
+				deltaV.y = d;
+				changed = true;
 			}
 		}
 
 		public void addRadial(double d) {
 			deltaV.x += d;
+			radialText = deltaV.x.ToString();
 			changed = true;
 		}
 
 		public void setRadial(String s) {
+			if(radialText.Equals(s, StringComparison.Ordinal)) { return; }
 			double d;
-			if(double.TryParse(s, out d)) {
-				if(d != deltaV.x) {
-					deltaV.x = d;
-					changed = true;
-				}
+			radialText = s;
+			if(s.EndsWith(".")) {
+				radialParsed = false;
+				return;
+			}
+			radialParsed = double.TryParse(radialText, out d);
+			if(radialParsed) {
+				radialText = d.ToString();
+				deltaV.x = d;
+				changed = true;
 			}
 		}
 
 		public void addUT(double d) {
 			lastUT += d;
+			timeText = lastUT.ToString();
 			changed = true;
 		}
 
 		public void setUT(double d) {
 			lastUT = d;
+			timeText = lastUT.ToString();
 			changed = true;
 		}
 
 		public void setUT(String s) {
+			if(timeText.Equals(s, StringComparison.Ordinal)) { return; }
 			double d;
-			if(double.TryParse(s, out d)) {
-				if(d != lastUT) {
-					lastUT = d;
-					changed = true;
-				}
+			timeText = s;
+			if(s.EndsWith(".")) {
+				timeParsed = false;
+				return;
+			}
+			timeParsed = double.TryParse(timeText, out d);
+			if(timeParsed) {
+				timeText = d.ToString();
+				lastUT = d;
+				changed = true;
 			}
 		}
 
@@ -351,19 +434,24 @@ namespace RegexKSP {
 		public void updateNode() {
 			if(changed) {
 				node.OnGizmoUpdated(deltaV, lastUT);
+			} else {
+				if(progradeParsed) {
+					deltaV.z = node.DeltaV.z;
+					progradeText = deltaV.z.ToString();
+				}
+				if(normalParsed) {
+					deltaV.y = node.DeltaV.y;
+					normalText = deltaV.y.ToString();
+				}
+				if(radialParsed) {
+					deltaV.x = node.DeltaV.x;
+					radialText = deltaV.x.ToString();
+				}
+				if(timeParsed) {
+					lastUT = node.UT;
+					timeText = lastUT.ToString();
+				}
 			}
-		}
-
-		private void dumpPatchedConicRenderer() {
-			PatchedConicRenderer p = FlightGlobals.ActiveVessel.patchedConicRenderer;
-			for(int i = 0; i < p.flightPlanRenders.Count; i++) {
-				Debug.Log("FPRender-" + i + ": " + p.flightPlanRenders[i].ToString());
-			}
-			for(int i = 0; i < p.patchRenders.Count; i++) {
-				Debug.Log("PRender-" + i + ": " + p.patchRenders[i].ToString());
-			}
-			Debug.Log("Solver: " + p.solver.ToString());
-
 		}
 	}
 }
