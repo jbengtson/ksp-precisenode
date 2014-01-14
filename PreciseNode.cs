@@ -4,7 +4,7 @@ using UnityEngine;
 using KSP.IO;
 
 /******************************************************************************
- * Copyright (c) 2013, Justin Bengtson
+ * Copyright (c) 2013-2014, Justin Bengtson
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -45,6 +45,7 @@ namespace RegexKSP {
 		private bool waitForKey = false;
 		private bool showOptions = false;
 		private bool showKeymapper = false;
+		private bool showEncounter = false;
 		private byte currentWaitKey = 255;
 		private double keyWaitTime = 0.0;
 
@@ -67,63 +68,7 @@ namespace RegexKSP {
 		/// Overridden function from MonoBehavior
 		/// </summary>
 		public void Update() {
-			if(!FlightDriver.Pause) {
-				if(canShowNodeEditor) {
-					processKeyInput();
-				}/*
-				PatchedConicSolver solver = NodeTools.getSolver();
-				if(solver.maneuverNodes.Count > 0) {
-					if(!curState.hasNode() || !solver.maneuverNodes.Contains(curState.node)) {
-						// get the first one if we can't find the current or it's null
-						curState = new PreciseNodeState(solver.maneuverNodes[0]);
-					} else if(curState.hasNode()) {
-						curState.updateNode();
-						curState = curState.nextState();
-					}
-				} else {
-					if(curState.hasNode()) {
-						curState = new PreciseNodeState();
-						curState.resizeClockWindow = true;
-					}
-				}*/
-			}
-		}
-
-		/// <summary>
-		/// Overridden function from MonoBehavior
-		/// </summary>
-		public void OnGUI() {
-			if(Event.current.type == EventType.Layout) {
-				// On layout we should see if we have nodes to act on.
-				if(curState.resizeMainWindow) {
-					options.mainWindowPos.height = 250;
-				}
-				if(curState.resizeClockWindow) {
-					options.clockWindowPos.height = 65;
-				}
-				// this prevents the clock window from showing the time to
-				// next node when the next state is created during repaint.
-				showTimeNext = curState.hasNode();
-			}
-			if(canShowNodeEditor) {
-				if(!conicsLoaded) {
-					NodeTools.changeConicsMode(options.conicsMode);
-					conicsLoaded = true;
-				}
-				if(shown) {
-					drawGUI();
-				} else if(canShowConicsWindow) {
-					drawConicsGUI();
-				}
-			} else if(canShowConicsWindow) {
-				drawConicsGUI();
-			}
-			if(canShowClock) {
-				drawClockGUI();
-			}
-			if(Event.current.type == EventType.Repaint && !FlightDriver.Pause) {
-				// On layout we should see if we have nodes to act on.
-
+			if(canShowNodeEditor && !FlightDriver.Pause) {
 				PatchedConicSolver solver = NodeTools.getSolver();
 				if(solver.maneuverNodes.Count > 0) {
 					if(!curState.hasNode() || !solver.maneuverNodes.Contains(curState.node)) {
@@ -139,6 +84,44 @@ namespace RegexKSP {
 						curState.resizeClockWindow = true;
 					}
 				}
+				processKeyInput();
+			}
+		}
+
+		/// <summary>
+		/// Overridden function from MonoBehavior
+		/// </summary>
+		public void OnGUI() {
+			if(canShowNodeEditor) {
+				if(Event.current.type == EventType.Layout && !FlightDriver.Pause) {
+					// On layout we should see if we have nodes to act on.
+					if(curState.resizeMainWindow) {
+						options.mainWindowPos.height = 250;
+					}
+					if(curState.resizeClockWindow) {
+						options.clockWindowPos.height = 65;
+					}
+					showEncounter = curState.encounter;
+					// this prevents the clock window from showing the time to
+					// next node when the next state is created during repaint.
+					showTimeNext = curState.hasNode();
+				}
+				if(!conicsLoaded) {
+					NodeTools.changeConicsMode(options.conicsMode);
+					conicsLoaded = true;
+				}
+				if(shown) {
+					drawGUI();
+				} else if(canShowConicsWindow) {
+					drawConicsGUI();
+				}/*
+				if(Event.current.type == EventType.Repaint && !FlightDriver.Pause) {
+				}*/
+			} else if(canShowConicsWindow) {
+				drawConicsGUI();
+			}
+			if(canShowClock) {
+				drawClockGUI();
 			}
 		}
 
@@ -184,12 +167,7 @@ namespace RegexKSP {
 			Color contentColor = GUI.contentColor;
 			Color curColor = defaultColor;
 			PatchedConicSolver solver = NodeTools.getSolver();
-			String check = "";
-
-			String timeUT = curState.node.UT.ToString("0.##");
-			String prograde = curState.node.DeltaV.z.ToString("0.##") + "m/s";
-			String normal = curState.node.DeltaV.y.ToString("0.##") + "m/s";
-			String radial = curState.node.DeltaV.x.ToString("0.##") + "m/s";
+			// String check = "";
 
 			// Options button
 			if(GUI.Button(new Rect(options.mainWindowPos.width - 48, 2, 22, 18), "O")) {
@@ -201,13 +179,12 @@ namespace RegexKSP {
 			}
 
 			GUILayout.BeginVertical();
-
 			if(options.showManeuverPager) {
 				GUIParts.drawManeuverPager(curState);
 			}
 
 			// Human-readable time
-			GUIParts.drawDoubleLabel("Time:", 100, NodeTools.convertUTtoHumanTime(curState.node.UT), 130);
+			GUIParts.drawDoubleLabel("Time:", 100, NodeTools.convertUTtoHumanTime(/*curState.node.UT*/ curState.currentUT()), 130);
 
 			// Increment buttons
 			GUILayout.BeginHorizontal();
@@ -219,6 +196,91 @@ namespace RegexKSP {
 			GUIParts.drawButton("100", (options.increment == 100?Color.yellow:defaultColor), delegate() { options.increment = 100; });
 			GUILayout.EndHorizontal();
 
+			drawTimeControls(contentColor);
+			drawProgradeControls(contentColor);
+			drawNormalControls(contentColor);
+			drawRadialControls(contentColor);
+
+			// total delta-V display
+			GUIParts.drawDoubleLabel("Total delta-V:", 100, /* curState.node.DeltaV.magnitude.ToString("0.##") */curState.currentMagnitude().ToString("0.##") + "m/s", 130);
+
+			drawEAngle();
+			drawEncounter(defaultColor);
+
+			// Conics mode controls
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
+			GUIParts.drawButton("0", (options.conicsMode == 0?Color.yellow:defaultColor), delegate() { options.setConicsMode(0); });
+			GUIParts.drawButton("1", (options.conicsMode == 1?Color.yellow:defaultColor), delegate() { options.setConicsMode(1); });
+			GUIParts.drawButton("2", (options.conicsMode == 2?Color.yellow:defaultColor), delegate() { options.setConicsMode(2); });
+			GUIParts.drawButton("3", (options.conicsMode == 3?Color.yellow:defaultColor), delegate() { options.setConicsMode(3); });
+			GUIParts.drawButton("4", (options.conicsMode == 4?Color.yellow:defaultColor), delegate() { options.setConicsMode(4); });
+			GUILayout.EndHorizontal();
+			
+			// conics patch limit editor.
+			GUILayout.BeginHorizontal();
+			GUILayout.Label("Change Conics Samples", GUILayout.Width(200));
+			GUIParts.drawButton("-", Color.red, delegate() { solver.DecreasePatchLimit(); });
+			GUIParts.drawButton("+", Color.red, delegate() { solver.IncreasePatchLimit(); });
+			GUILayout.EndHorizontal();
+			
+			// trip info button and vessel focus buttons
+			GUILayout.BeginHorizontal();
+			GUIParts.drawButton("Trip Info", (options.showTrip?Color.yellow:defaultColor), delegate() { options.showTrip = !options.showTrip; });
+			GUIParts.drawButton("Focus on Vessel", defaultColor, delegate() { MapView.MapCamera.SetTarget(FlightGlobals.ActiveVessel.vesselName); });
+			GUILayout.EndHorizontal();
+			
+			GUILayout.EndVertical();
+			GUI.DragWindow();
+		}
+
+		// debugging function
+		private void drawEAngle() {
+			// Ejection angle
+			if(options.showEAngle) {
+				String eangle = "n/a";
+				if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
+					eangle = NodeTools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, /* curState.node.UT */ curState.currentUT()).ToString("0.##") + "°";
+				}
+				GUIParts.drawDoubleLabel("Ejection Angle:", 100, eangle, 130);
+			}
+		}
+
+		// debugging function
+		private void drawEncounter(Color defaultColor) {
+			// Additional Information
+			if(options.showOrbitInfo) {
+				// Find the next encounter, if any, in our flight plan.
+				// if(curState.encounter) {
+				if(showEncounter) {
+					Orbit nextEnc = NodeTools.findNextEncounter(curState.node);
+	
+					string name = "N/A";
+					string PeA = "N/A";
+					if(nextEnc != null) {
+						name = nextEnc.referenceBody.name;
+						PeA = NodeTools.formatMeters(nextEnc.PeA);
+					} else {
+						curState.encounter = false;
+					}
+					// Next encounter periapsis
+					GUIParts.drawDoubleLabel("(" + name + ") Pe:", 100, PeA, 130);
+					GUILayout.BeginHorizontal();
+					GUILayout.Label("", GUILayout.Width(100));
+					GUIParts.drawButton("Focus on " + name, defaultColor, delegate() { MapView.MapCamera.SetTarget(name); });
+					GUILayout.EndHorizontal();
+				} else {
+					if(curState.node.solver.flightPlan.Count > 1) {
+						// output the apoapsis and periapsis of our projected orbit.
+						GUIParts.drawDoubleLabel("Apoapsis:", 100, NodeTools.formatMeters(curState.node.nextPatch.ApA), 100);
+						GUIParts.drawDoubleLabel("Periapsis:", 100, NodeTools.formatMeters(curState.node.nextPatch.PeA), 130);
+					}
+				}
+			}
+		}
+
+		// debugging function
+		private void drawTimeControls(Color contentColor) {
 			// Universal time controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("UT:", GUILayout.Width(100));
@@ -226,7 +288,7 @@ namespace RegexKSP {
 			if(!curState.timeParsed) {
 				GUI.contentColor = Color.red;
 			}
-			check = GUILayout.TextField(curState.timeText, GUILayout.Width(100));
+			string check = GUILayout.TextField(curState.timeText, GUILayout.Width(100));
 			if(!curState.timeText.Equals(check, StringComparison.Ordinal)) {
 				curState.setUT(check);
 			}
@@ -246,14 +308,17 @@ namespace RegexKSP {
 				GUIParts.drawButton("Apo", Color.blue, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToAp); });
 				GUILayout.EndHorizontal();
 			}
+		}
 
+		// debugging function
+		private void drawProgradeControls(Color contentColor) {
 			// Prograde controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Prograde:", GUILayout.Width(100));
 			if(!curState.progradeParsed) {
 				GUI.contentColor = Color.red;
 			}
-			check = GUILayout.TextField(curState.progradeText, GUILayout.Width(100));
+			string check = GUILayout.TextField(curState.progradeText, GUILayout.Width(100));
 			if(!curState.progradeText.Equals(check, StringComparison.Ordinal)) {
 				curState.setPrograde(check);
 			}
@@ -261,14 +326,17 @@ namespace RegexKSP {
 			GUIParts.drawButton("-", Color.red, delegate() { curState.addPrograde(options.increment * -1.0); });
 			GUIParts.drawButton("+", Color.green, delegate() { curState.addPrograde(options.increment); });
 			GUILayout.EndHorizontal();
+		}
 
+		// debugging function
+		private void drawNormalControls(Color contentColor) {
 			// Normal controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Normal:", GUILayout.Width(100));
 			if(!curState.normalParsed) {
 				GUI.contentColor = Color.red;
 			}
-			check = GUILayout.TextField(curState.normalText, GUILayout.Width(100));
+			string check = GUILayout.TextField(curState.normalText, GUILayout.Width(100));
 			if(!curState.normalText.Equals(check, StringComparison.Ordinal)) {
 				curState.setNormal(check);
 			}
@@ -276,14 +344,17 @@ namespace RegexKSP {
 			GUIParts.drawButton("-", Color.red, delegate() { curState.addNormal(options.increment * -1.0); });
 			GUIParts.drawButton("+", Color.green, delegate() { curState.addNormal(options.increment); });
 			GUILayout.EndHorizontal();
+		}
 
+		// debugging function
+		private void drawRadialControls(Color contentColor) {
 			// radial controls
 			GUILayout.BeginHorizontal();
 			GUILayout.Label("Radial:", GUILayout.Width(100));
 			if(!curState.radialParsed) {
 				GUI.contentColor = Color.red;
 			}
-			check = GUILayout.TextField(curState.radialText, GUILayout.Width(100));
+			string check = GUILayout.TextField(curState.radialText, GUILayout.Width(100));
 			if(!curState.radialText.Equals(check, StringComparison.Ordinal)) {
 				curState.setRadial(check);
 			}
@@ -291,65 +362,6 @@ namespace RegexKSP {
 			GUIParts.drawButton("-", Color.red, delegate() { curState.addRadial(options.increment * -1.0); });
 			GUIParts.drawButton("+", Color.green, delegate() { curState.addRadial(options.increment); });
 			GUILayout.EndHorizontal();
-
-			// total delta-V display
-			GUIParts.drawDoubleLabel("Total delta-V:", 100, curState.node.DeltaV.magnitude.ToString("0.##") + "m/s", 130);
-
-			// Ejection angle
-			if(options.showEAngle) {
-				String eangle = "n/a";
-				if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
-					eangle = NodeTools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, curState.node.UT).ToString("0.##") + "°";
-				}
-				GUIParts.drawDoubleLabel("Ejection Angle:", 100, eangle, 130);
-			}
-
-			// Additional Information
-			if(options.showOrbitInfo) {
-				// Find the next encounter, if any, in our flight plan.
-				if(curState.encounter) {
-					Orbit nextEnc = NodeTools.findNextEncounter(curState.node);
-					// Next encounter periapsis
-					GUIParts.drawDoubleLabel("(" + nextEnc.referenceBody.name + ") Pe:", 100, NodeTools.formatMeters(nextEnc.PeA), 130);
-
-					GUILayout.BeginHorizontal();
-					GUILayout.Label("", GUILayout.Width(100));
-					GUIParts.drawButton("Focus on " + nextEnc.referenceBody.name, defaultColor, delegate() { MapView.MapCamera.SetTarget(nextEnc.referenceBody.name); });
-					GUILayout.EndHorizontal();
-				} else {
-					if(curState.node.solver.flightPlan.Count > 1) {
-						// output the apoapsis and periapsis of our projected orbit.
-						GUIParts.drawDoubleLabel("Apoapsis:", 100, NodeTools.formatMeters(curState.node.nextPatch.ApA), 100);
-						GUIParts.drawDoubleLabel("Periapsis:", 100, NodeTools.formatMeters(curState.node.nextPatch.PeA), 130);
-					}
-				}
-			}
-
-			// Conics mode controls
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("Conics mode: ", GUILayout.Width(100));
-			GUIParts.drawButton("0", (options.conicsMode == 0?Color.yellow:defaultColor), delegate() { options.setConicsMode(0); });
-			GUIParts.drawButton("1", (options.conicsMode == 1?Color.yellow:defaultColor), delegate() { options.setConicsMode(1); });
-			GUIParts.drawButton("2", (options.conicsMode == 2?Color.yellow:defaultColor), delegate() { options.setConicsMode(2); });
-			GUIParts.drawButton("3", (options.conicsMode == 3?Color.yellow:defaultColor), delegate() { options.setConicsMode(3); });
-			GUIParts.drawButton("4", (options.conicsMode == 4?Color.yellow:defaultColor), delegate() { options.setConicsMode(4); });
-			GUILayout.EndHorizontal();
-
-			// conics patch limit editor.
-			GUILayout.BeginHorizontal();
-			GUILayout.Label("Change Conics Samples", GUILayout.Width(200));
-			GUIParts.drawButton("-", Color.red, delegate() { solver.DecreasePatchLimit(); });
-			GUIParts.drawButton("+", Color.red, delegate() { solver.IncreasePatchLimit(); });
-			GUILayout.EndHorizontal();
-
-			// trip info button and vessel focus buttons
-			GUILayout.BeginHorizontal();
-			GUIParts.drawButton("Trip Info", (options.showTrip?Color.yellow:defaultColor), delegate() { options.showTrip = !options.showTrip; });
-			GUIParts.drawButton("Focus on Vessel", defaultColor, delegate() { MapView.MapCamera.SetTarget(FlightGlobals.ActiveVessel.vesselName); });
-			GUILayout.EndHorizontal();
-
-			GUILayout.EndVertical();
-			GUI.DragWindow();
 		}
 
 		/// <summary>
@@ -589,7 +601,7 @@ namespace RegexKSP {
 		/// <value><c>true</c> if the Node Editor can be shown; otherwise, <c>false</c>.</value>
 		private bool canShowNodeEditor {
 			get {
-				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && MapView.MapIsEnabled && NodeTools.getSolver().maneuverNodes.Count > 0 && curState.hasNode();
+				return FlightGlobals.fetch != null && FlightGlobals.ActiveVessel != null && MapView.MapIsEnabled && NodeTools.getSolver().maneuverNodes.Count > 0;
 			}
 		}
 
