@@ -4,7 +4,7 @@ using UnityEngine;
 using KSP.IO;
 
 /******************************************************************************
- * Copyright (c) 2013, Justin Bengtson
+ * Copyright (c) 2013-2014, Justin Bengtson
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -283,16 +283,11 @@ namespace RegexKSP {
 		}
 	}
 
-
-	// Node manager policy:
-	// if the manager has been changed from the last update manager snapshot, take the manager
-	// UNLESS
-	// if the node has been changed from the last update node snapshot, take the node
 	public class NodeManager {
+		public NodeState curNodeState;
+		public NodeState curState;
 		public ManeuverNode node = null;
 		public ManeuverNode nextNode = null;
-		public Vector3d deltaV;
-		public double lastUT = 0;
 		public bool changed = false;
 		public bool encounter = false;
 		public bool resizeMainWindow = false;
@@ -308,17 +303,17 @@ namespace RegexKSP {
 		public string timeText = "";
 
 		public NodeManager() {
-			deltaV = new Vector3d();
+			curState = new NodeState();
 		}
 
 		public NodeManager(ManeuverNode n) {
-			deltaV = new Vector3d(n.DeltaV.x, n.DeltaV.y, n.DeltaV.z);
-			lastUT = n.UT;
+			curState = new NodeState(n);
+			curNodeState = new NodeState(n);
 			node = n;
 			progradeText = n.DeltaV.z.ToString();
 			normalText = n.DeltaV.y.ToString();
 			radialText = n.DeltaV.x.ToString();
-			timeText = lastUT.ToString();
+			timeText = n.UT.ToString();
 			if(NodeTools.findNextEncounter(n) != null) {
 				encounter = true;
 			}
@@ -335,8 +330,8 @@ namespace RegexKSP {
 		}
 
 		public void addPrograde(double d) {
-			deltaV.z += d;
-			progradeText = deltaV.z.ToString();
+			curState.deltaV.z += d;
+			progradeText = curState.deltaV.z.ToString();
 			changed = true;
 		}
 
@@ -349,15 +344,17 @@ namespace RegexKSP {
 			}
 			progradeParsed = double.TryParse(progradeText, out d);
 			if(progradeParsed) {
-				progradeText = d.ToString();
-				deltaV.z = d;
-				changed = true;
+				if(d != curState.deltaV.z) {
+					progradeText = d.ToString();
+					curState.deltaV.z = d;
+					changed = true;
+				}
 			}
 		}
 
 		public void addNormal(double d) {
-			deltaV.y += d;
-			normalText = deltaV.y.ToString();
+			curState.deltaV.y += d;
+			normalText = curState.deltaV.y.ToString();
 			changed = true;
 		}
 
@@ -371,15 +368,17 @@ namespace RegexKSP {
 			}
 			normalParsed = double.TryParse(normalText, out d);
 			if(normalParsed) {
-				normalText = d.ToString();
-				deltaV.y = d;
-				changed = true;
+				if(d != curState.deltaV.y) {
+					normalText = d.ToString();
+					curState.deltaV.y = d;
+					changed = true;
+				}
 			}
 		}
 
 		public void addRadial(double d) {
-			deltaV.x += d;
-			radialText = deltaV.x.ToString();
+			curState.deltaV.x += d;
+			radialText = curState.deltaV.x.ToString();
 			changed = true;
 		}
 
@@ -393,21 +392,27 @@ namespace RegexKSP {
 			}
 			radialParsed = double.TryParse(radialText, out d);
 			if(radialParsed) {
-				radialText = d.ToString();
-				deltaV.x = d;
-				changed = true;
+				if(d != curState.deltaV.x) {
+					radialText = d.ToString();
+					curState.deltaV.x = d;
+					changed = true;
+				}
 			}
 		}
 
+		public double currentUT() {
+			return curState.UT;
+		}
+
 		public void addUT(double d) {
-			lastUT += d;
-			timeText = lastUT.ToString();
+			curState.UT += d;
+			timeText = curState.UT.ToString();
 			changed = true;
 		}
 
 		public void setUT(double d) {
-			lastUT = d;
-			timeText = lastUT.ToString();
+			curState.UT = d;
+			timeText = curState.UT.ToString();
 			changed = true;
 		}
 
@@ -421,10 +426,16 @@ namespace RegexKSP {
 			}
 			timeParsed = double.TryParse(timeText, out d);
 			if(timeParsed) {
-				timeText = d.ToString();
-				lastUT = d;
-				changed = true;
+				if(d != curState.UT) {
+					timeText = d.ToString();
+					curState.UT = d;
+					changed = true;
+				}
 			}
+		}
+
+		public double currentMagnitude() {
+			return curState.deltaV.magnitude;
 		}
 
 		public bool hasNode() {
@@ -432,26 +443,62 @@ namespace RegexKSP {
 		}
 
 		public void updateNode() {
-			if(changed) {
-				node.OnGizmoUpdated(deltaV, lastUT);
+			// Node manager policy:
+			// if the manager has been changed from the last update manager snapshot, take the manager
+			// UNLESS
+			// if the node has been changed from the last update node snapshot, take the node
+			if(curNodeState.compare(node)) {
+				// the node hasn't changed, do our own thing
+				if(changed) {
+					if(node.attachedGizmo != null) {
+						node.attachedGizmo.DeltaV = curState.getVector();
+						node.attachedGizmo.UT = curState.UT;
+					}
+					node.OnGizmoUpdated(curState.getVector(), curState.UT);
+					curNodeState.update(node);
+				}
 			} else {
-				if(progradeParsed) {
-					deltaV.z = node.DeltaV.z;
-					progradeText = deltaV.z.ToString();
-				}
-				if(normalParsed) {
-					deltaV.y = node.DeltaV.y;
-					normalText = deltaV.y.ToString();
-				}
-				if(radialParsed) {
-					deltaV.x = node.DeltaV.x;
-					radialText = deltaV.x.ToString();
-				}
-				if(timeParsed) {
-					lastUT = node.UT;
-					timeText = lastUT.ToString();
-				}
+				// the node has changed, take the node's new information for ourselves.
+				curNodeState.update(node);
+				curState.update(node);
+				progradeText = node.DeltaV.z.ToString();
+				normalText = node.DeltaV.y.ToString();
+				radialText = node.DeltaV.x.ToString();
+				timeText = node.UT.ToString();
 			}
+		}
+	}
+
+	public class NodeState {
+		public Vector3d deltaV;
+		public double UT;
+
+		public NodeState() {
+			deltaV = new Vector3d();
+			UT = 0;
+		}
+
+		public NodeState(ManeuverNode m) {
+			deltaV = new Vector3d(m.DeltaV.x, m.DeltaV.y, m.DeltaV.z);
+			UT = m.UT;
+		}
+
+		public void update(ManeuverNode m) {
+			deltaV.x = m.DeltaV.x;
+			deltaV.y = m.DeltaV.y;
+			deltaV.z = m.DeltaV.z;
+			UT = m.UT;
+		}
+
+		public Vector3d getVector() {
+			return new Vector3d(deltaV.x, deltaV.y, deltaV.z);
+		}
+
+		public bool compare(ManeuverNode m) {
+			if(deltaV.x != m.DeltaV.x || deltaV.y != m.DeltaV.y || deltaV.z != m.DeltaV.z || UT != m.UT) {
+				return false;
+			}
+			return true;
 		}
 	}
 }
