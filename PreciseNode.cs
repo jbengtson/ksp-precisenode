@@ -170,13 +170,18 @@ namespace RegexKSP {
 			// String check = "";
 
 			// Options button
+			if(showOptions) { GUI.backgroundColor = Color.green; }
 			if(GUI.Button(new Rect(options.mainWindowPos.width - 48, 2, 22, 18), "O")) {
-				showOptions = true;
+				showOptions = !showOptions;
 			}
+			GUI.backgroundColor = defaultColor;
+
 			// Keymapping button
+			if(showKeymapper) { GUI.backgroundColor = Color.green; }
 			if(GUI.Button(new Rect(options.mainWindowPos.width - 24, 2, 22, 18), "K")) {
-				showKeymapper = true;
+				showKeymapper = !showKeymapper;
 			}
+			GUI.backgroundColor = defaultColor;
 
 			GUILayout.BeginVertical();
 			if(options.showManeuverPager) {
