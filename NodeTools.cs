@@ -308,12 +308,15 @@ namespace RegexKSP {
 
 		public NodeManager(ManeuverNode n) {
 			curState = new NodeState(n);
-			curNodeState = new NodeState(n);
+			curNodeState = new NodeState();
 			node = n;
+			updateCurrentNodeState();
+/*
 			progradeText = n.DeltaV.z.ToString();
 			normalText = n.DeltaV.y.ToString();
 			radialText = n.DeltaV.x.ToString();
 			timeText = n.UT.ToString();
+*/
 			if(NodeTools.findNextEncounter(n) != null) {
 				encounter = true;
 			}
@@ -455,17 +458,22 @@ namespace RegexKSP {
 						node.attachedGizmo.UT = curState.UT;
 					}
 					node.OnGizmoUpdated(curState.getVector(), curState.UT);
-					curNodeState.update(node);
+					updateCurrentNodeState();
+					changed = false; // new
 				}
 			} else {
 				// the node has changed, take the node's new information for ourselves.
-				curNodeState.update(node);
+				updateCurrentNodeState();
 				curState.update(node);
-				progradeText = node.DeltaV.z.ToString();
-				normalText = node.DeltaV.y.ToString();
-				radialText = node.DeltaV.x.ToString();
-				timeText = node.UT.ToString();
 			}
+		}
+
+		private void updateCurrentNodeState() {
+			curNodeState.update(node);
+			progradeText = node.DeltaV.z.ToString();
+			normalText = node.DeltaV.y.ToString();
+			radialText = node.DeltaV.x.ToString();
+			timeText = node.UT.ToString();
 		}
 	}
 
