@@ -76,8 +76,6 @@ namespace RegexKSP {
 		public void Load(ConfigNode node) {
 			if(!HighLogic.LoadedSceneIsFlight || FlightGlobals.ActiveVessel == null || parent.vessel == null) {
 				return;
-			} else if(parent.vessel.patchedConicSolver == null) {
-				return;
 			}
 
 			string[] values = node.GetValues("node");
@@ -106,6 +104,7 @@ namespace RegexKSP {
 					nodes.Add(new NodeState(deltav, d));
 				}
 			}
+			Debug.Log("Node Saver loaded " + max + " nodes.");
 		}
 	
 		public void Save(ConfigNode node) {
@@ -119,6 +118,7 @@ namespace RegexKSP {
 			foreach(ManeuverNode m in parent.vessel.patchedConicSolver.maneuverNodes) {
 				node.AddValue("node", m.DeltaV.x + delimiter[0] + m.DeltaV.y + delimiter[0] + m.DeltaV.z + delimiter[0] + m.UT);
 			}
+			Debug.Log("Node Saver saved " + parent.vessel.patchedConicSolver.maneuverNodes.Count + " nodes.");
 		}
 	}
 }
