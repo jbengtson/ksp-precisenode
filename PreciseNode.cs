@@ -37,6 +37,7 @@ namespace RegexKSP {
 		public PluginConfiguration config;
 		private PNOptions options = new PNOptions();
 		private NodeManager curState = new NodeManager();
+		private List<Action> scheduledForLayout = new List<Action>();
 
 		private bool configLoaded = false;
 		private bool conicsLoaded = false;
@@ -92,6 +93,13 @@ namespace RegexKSP {
 		/// Overridden function from MonoBehavior
 		/// </summary>
 		public void OnGUI() {
+			// Porcess any scheduled functions
+			if(Event.current.type == EventType.Layout && !FlightDriver.Pause && scheduledForLayout.Count > 0) {
+				foreach(Action a in scheduledForLayout) {
+					a();
+				}
+				scheduledForLayout.Clear();
+			}
 			if(canShowNodeEditor) {
 				if(Event.current.type == EventType.Layout && !FlightDriver.Pause) {
 					// On layout we should see if we have nodes to act on.
@@ -114,9 +122,7 @@ namespace RegexKSP {
 					drawGUI();
 				} else if(canShowConicsWindow) {
 					drawConicsGUI();
-				}/*
-				if(Event.current.type == EventType.Repaint && !FlightDriver.Pause) {
-				}*/
+				}
 			} else if(canShowConicsWindow) {
 				drawConicsGUI();
 			}
@@ -167,7 +173,6 @@ namespace RegexKSP {
 			Color contentColor = GUI.contentColor;
 			Color curColor = defaultColor;
 			PatchedConicSolver solver = NodeTools.getSolver();
-			// String check = "";
 
 			// Options button
 			if(showOptions) { GUI.backgroundColor = Color.green; }
@@ -189,7 +194,7 @@ namespace RegexKSP {
 			}
 
 			// Human-readable time
-			GUIParts.drawDoubleLabel("Time:", 100, NodeTools.convertUTtoHumanTime(/*curState.node.UT*/ curState.currentUT()), 130);
+			GUIParts.drawDoubleLabel("Time:", 100, NodeTools.convertUTtoHumanTime(curState.currentUT()), 130);
 
 			// Increment buttons
 			GUILayout.BeginHorizontal();
@@ -207,7 +212,7 @@ namespace RegexKSP {
 			drawRadialControls(contentColor);
 
 			// total delta-V display
-			GUIParts.drawDoubleLabel("Total delta-V:", 100, /* curState.node.DeltaV.magnitude.ToString("0.##") */curState.currentMagnitude().ToString("0.##") + "m/s", 130);
+			GUIParts.drawDoubleLabel("Total delta-V:", 100, curState.currentMagnitude().ToString("0.##") + "m/s", 130);
 
 			drawEAngle();
 			drawEncounter(defaultColor);
@@ -245,7 +250,7 @@ namespace RegexKSP {
 			if(options.showEAngle) {
 				String eangle = "n/a";
 				if(FlightGlobals.ActiveVessel.orbit.referenceBody.name != "Sun") {
-					eangle = NodeTools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, /* curState.node.UT */ curState.currentUT()).ToString("0.##") + "°";
+					eangle = NodeTools.getEjectionAngle(FlightGlobals.ActiveVessel.orbit, curState.currentUT()).ToString("0.##") + "°";
 				}
 				GUIParts.drawDoubleLabel("Ejection Angle:", 100, eangle, 130);
 			}
@@ -256,12 +261,11 @@ namespace RegexKSP {
 			// Additional Information
 			if(options.showOrbitInfo) {
 				// Find the next encounter, if any, in our flight plan.
-				// if(curState.encounter) {
 				if(showEncounter) {
 					Orbit nextEnc = NodeTools.findNextEncounter(curState.node);
-	
 					string name = "N/A";
 					string PeA = "N/A";
+
 					if(nextEnc != null) {
 						name = nextEnc.referenceBody.name;
 						PeA = NodeTools.formatMeters(nextEnc.PeA);
@@ -306,10 +310,24 @@ namespace RegexKSP {
 			if(options.showUTControls) {
 				GUILayout.BeginHorizontal();
 				GUIParts.drawButton("Peri", Color.yellow, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToPe); });
-				GUIParts.drawButton("-10K", Color.magenta, delegate() { curState.addUT(-10000); });
+				GUIParts.drawButton("DN", Color.magenta, delegate() {
+					Orbit targ = NodeTools.getTargetOrbit();
+					if(targ != null) {
+						curState.setUT(NodeTools.getTargetDNUT(curState.node.patch, targ));
+					} else {
+						curState.setUT(NodeTools.getEquatorialDNUT(curState.node.patch));
+					}
+				});
 				GUIParts.drawButton("-1K", Color.red, delegate() { curState.addUT(-1000); });
 				GUIParts.drawButton("+1K", Color.green, delegate() { curState.addUT(1000); });
-				GUIParts.drawButton("+10K", Color.cyan, delegate() { curState.addUT(10000); });
+				GUIParts.drawButton("AN", Color.cyan, delegate() {
+					Orbit targ = NodeTools.getTargetOrbit();
+					if(targ != null) {
+						curState.setUT(NodeTools.getTargetANUT(curState.node.patch, targ));
+					} else {
+						curState.setUT(NodeTools.getEquatorialANUT(curState.node.patch));
+					}
+				});
 				GUIParts.drawButton("Apo", Color.blue, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToAp); });
 				GUILayout.EndHorizontal();
 			}
@@ -575,7 +593,8 @@ namespace RegexKSP {
 				GUILayout.BeginHorizontal();
 				GUILayout.Label("", GUILayout.Width(60));
 				GUILayout.Label("Δv", GUILayout.Width(90));
-				GUILayout.Label("Time Until", GUILayout.Width(150));
+				GUILayout.Label("Time Until", GUILayout.Width(200));
+				GUILayout.Label("", GUILayout.Width(120));
 				GUILayout.EndHorizontal();
 
 				foreach(ManeuverNode curNode in solver.maneuverNodes) {
@@ -584,7 +603,11 @@ namespace RegexKSP {
 					GUILayout.BeginHorizontal();
 					GUILayout.Label("Node " + idx, GUILayout.Width(60));
 					GUILayout.Label(curNode.DeltaV.magnitude.ToString("F2") + "m/s", GUILayout.Width(90));
-					GUILayout.Label(NodeTools.convertUTtoHumanDuration(timeDiff), GUILayout.Width(150));
+					GUILayout.Label(NodeTools.convertUTtoHumanDuration(timeDiff), GUILayout.Width(200));
+					// these will be scheduled for during the next layout pass
+					if(idx > 0) {
+						GUIParts.drawButton("merge ▲", Color.white, delegate() {scheduledForLayout.Add(new Action(() => {NodeTools.mergeNodeDown(solver.maneuverNodes[idx]);}));});
+					}
 					GUILayout.EndHorizontal();
 					total += curNode.DeltaV.magnitude;
 				}
@@ -592,7 +615,7 @@ namespace RegexKSP {
 				GUILayout.BeginHorizontal();
 				GUILayout.Label("Total", GUILayout.Width(60));
 				GUILayout.Label(total.ToString("F2") + "m/s", GUILayout.Width(90));
-				GUILayout.Label("", GUILayout.Width(150));
+				GUILayout.Label("", GUILayout.Width(200));
 				GUILayout.EndHorizontal();
 			}
 
@@ -643,6 +666,12 @@ namespace RegexKSP {
 		/// </summary>
 		private void processKeyInput() {
 			if(!Input.anyKeyDown) {
+				return;
+			}
+
+			// Fix for a bug in Linux where typing would still control game elements even if
+			// a textbox was focused.
+			if(GUIUtility.keyboardControl != 0) {
 				return;
 			}
 
