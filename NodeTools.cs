@@ -113,12 +113,45 @@ namespace RegexKSP {
 		}
 
 		/// <summary>
-		/// Converts Radians to Degrees
+		/// Merges the given node into the next lowest node (n's index - 1).  If there is no lower node, does nothing.
 		/// </summary>
-		/// <returns>The converted radians</returns>
-		/// <param name="d">The radians to convert</param>
-		public static double radToDeg(double d) {
-			return d * 57.295779513082323;
+		/// <param name="n">The ManeuverNode to merge down.</param>
+		public static void mergeNodeDown(ManeuverNode n) {
+			PatchedConicSolver p = NodeTools.getSolver();
+			Orbit o = FlightGlobals.ActiveVessel.orbit;
+			int nodes = p.maneuverNodes.Count;
+			int idx = p.maneuverNodes.IndexOf(n);
+
+			// if we're the last or only node, don't bother.
+			if(idx == 0 || nodes < 2) { return; }
+			ManeuverNode mergeInto = p.maneuverNodes[idx-1];
+
+			Vector3d deltaV = mergeBurnVectors(mergeInto.UT, mergeInto, n.patch);
+
+			mergeInto.OnGizmoUpdated(deltaV, mergeInto.UT);
+			p.maneuverNodes.Remove(n);
+		}
+
+		// calculation function for mergeNodeDown
+		private static Vector3d mergeBurnVectors(double UT, ManeuverNode first, Orbit projOrbit) {
+			Orbit curOrbit = findPreviousOrbit(first);
+			return difference(curOrbit.getOrbitalVelocityAtUT(UT), projOrbit.getOrbitalVelocityAtUT(UT));
+		}
+
+		// calculation function for mergeNodeDown
+		private static Orbit findPreviousOrbit(ManeuverNode n) {
+			PatchedConicSolver p = getSolver();
+			int idx = p.maneuverNodes.IndexOf(n);
+			if(idx > 0) {
+				return p.maneuverNodes[idx-1].patch;
+			} else {
+				return FlightGlobals.ActiveVessel.orbit;
+			}
+		}
+
+		// calculation function for mergeNodeDown
+		private static Vector3d difference(Vector3d initial, Vector3d final) {
+			return new Vector3d(-(initial.x - final.x), -(initial.y - final.y), -(initial.z - final.z)).xzy;
 		}
 
 		/// <summary>
@@ -141,6 +174,76 @@ namespace RegexKSP {
 		}
 
 		/// <summary>
+		/// Returns the orbit of the currently targeted item or null if there is none.
+		/// </summary>
+		/// <returns>The orbit or null.</returns>
+		public static Orbit getTargetOrbit() {
+			ITargetable tgt = FlightGlobals.fetch.VesselTarget;
+			if(tgt != null) {
+				// if we have a null vessel it's a celestial body
+				if(tgt.GetVessel() == null) { return tgt.GetOrbit(); }
+				// otherwise make sure we're not targeting ourselves.
+				if(!FlightGlobals.fetch.activeVessel.Equals(tgt.GetVessel())) {
+					return tgt.GetOrbit();
+				}
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Gets the UT for the equatorial AN.
+		/// </summary>
+		/// <returns>The equatorial AN UT.</returns>
+		/// <param name="o">The Orbit to calculate the UT from.</param>
+		public static double getEquatorialANUT(Orbit o) {
+			return o.GetUTforTrueAnomaly(o.GetTrueAnomalyOfZupVector(o.GetANVector()), 2);
+		}
+
+		/// <summary>
+		/// Gets the UT for the ascending node in reference to the target orbit.
+		/// </summary>
+		/// <returns>The UT for the ascending node in reference to the target orbit.</returns>
+		/// <param name="a">The orbit to find the UT on.</param>
+		/// <param name="b">The target orbit.</param>
+		public static double getTargetANUT(Orbit a, Orbit b) {
+			Vector3d ANVector = Vector3d.Cross(b.h, a.GetOrbitNormal()).normalized;
+			return a.GetUTforTrueAnomaly(a.GetTrueAnomalyOfZupVector(ANVector), 2);
+		}
+
+		/// <summary>
+		/// Gets the UT for the equatorial DN.
+		/// </summary>
+		/// <returns>The equatorial DN UT.</returns>
+		/// <param name="o">The Orbit to calculate the UT from.</param>
+		public static double getEquatorialDNUT(Orbit o) {
+			Vector3d DNVector = QuaternionD.AngleAxis(NodeTools.Angle360(o.LAN + 180), Planetarium.Zup.Z) * Planetarium.Zup.X;
+			return o.GetUTforTrueAnomaly(o.GetTrueAnomalyOfZupVector(DNVector), 2);
+		}
+
+		/// <summary>
+		/// Gets the UT for the descending node in reference to the target orbit.
+		/// </summary>
+		/// <returns>The UT for the descending node in reference to the target orbit.</returns>
+		/// <param name="a">The orbit to find the UT on.</param>
+		/// <param name="b">The target orbit.</param>
+		public static double getTargetDNUT(Orbit a, Orbit b) {
+			Vector3d DNVector = Vector3d.Cross(a.GetOrbitNormal(), b.h).normalized;
+			return a.GetUTforTrueAnomaly(a.GetTrueAnomalyOfZupVector(DNVector), 2);
+		}
+
+		/// <summary>
+		/// Adjusts the specified angle to between 0 and 360 degrees.
+		/// </summary>
+		/// <param name="d">The specified angle to restrict.</param>
+        public static double Angle360(double d) {
+            d %= 360;
+            if(d < 0) {
+				return d + 360;
+			}
+			return d;
+        }
+
+		/// <summary>
 		/// Gets the ejection angle of the current maneuver node.
 		/// </summary>
 		/// <returns>The ejection angle in degrees.  Positive results are the angle from prograde, negative results are the angle from retrograde.</returns>
@@ -151,12 +254,7 @@ namespace RegexKSP {
 			// Convert the node's orbit position to world space and get the raw ejection angle
 			// Vector3d worldpos = body.position + thisOrbit.getRelativePositionAtUT(nodeUT).xzy;
 			Vector3d worldpos = body.position + o.getRelativePositionAtUT(nodeUT).xzy;
-			double eangle = ((body.GetLongitude(worldpos) + body.rotationAngle)	- (body.orbit.LAN / 360 + body.orbit.orbitPercent) * 360) % 360;
-
-			// Correct negative angles.
-			if(eangle < 0) {
-				eangle += 360;
-			}
+			double eangle = NodeTools.Angle360((body.GetLongitude(worldpos) + body.rotationAngle)	- (body.orbit.LAN / 360 + body.orbit.orbitPercent) * 360);
 
 			// Correct to angle from retrograde if needed.
 			if(eangle < 270) {
@@ -311,12 +409,7 @@ namespace RegexKSP {
 			curNodeState = new NodeState();
 			node = n;
 			updateCurrentNodeState();
-/*
-			progradeText = n.DeltaV.z.ToString();
-			normalText = n.DeltaV.y.ToString();
-			radialText = n.DeltaV.x.ToString();
-			timeText = n.UT.ToString();
-*/
+
 			if(NodeTools.findNextEncounter(n) != null) {
 				encounter = true;
 			}
@@ -442,7 +535,8 @@ namespace RegexKSP {
 		}
 
 		public bool hasNode() {
-			return (node != null);
+			if(node == null) { return false; }
+			return true;
 		}
 
 		public void updateNode() {
@@ -486,6 +580,11 @@ namespace RegexKSP {
 			UT = 0;
 		}
 
+		public NodeState(Vector3d dv, double u) {
+			deltaV = new Vector3d(dv.x, dv.y, dv.z);
+			UT = u;
+		}
+
 		public NodeState(ManeuverNode m) {
 			deltaV = new Vector3d(m.DeltaV.x, m.DeltaV.y, m.DeltaV.z);
 			UT = m.UT;
@@ -507,6 +606,11 @@ namespace RegexKSP {
 				return false;
 			}
 			return true;
+		}
+
+		public void createManeuverNode(PatchedConicSolver p) {
+			ManeuverNode newnode = p.AddManeuverNode(UT);
+			newnode.OnGizmoUpdated(deltaV, UT);
 		}
 	}
 }
