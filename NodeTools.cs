@@ -251,19 +251,14 @@ namespace RegexKSP {
 		public static double getEjectionAngle(Orbit o, double nodeUT) {
 			CelestialBody body = o.referenceBody;
 
-			// Convert the node's orbit position to world space and get the raw ejection angle
-			// Vector3d worldpos = body.position + thisOrbit.getRelativePositionAtUT(nodeUT).xzy;
-			Vector3d worldpos = body.position + o.getRelativePositionAtUT(nodeUT).xzy;
-			double eangle = NodeTools.Angle360((body.GetLongitude(worldpos) + body.rotationAngle)	- (body.orbit.LAN / 360 + body.orbit.orbitPercent) * 360);
+			// Calculate the angle between the node's position and the reference body's velocity at nodeUT
+			Vector3d prograde = body.orbit.getOrbitalVelocityAtUT(nodeUT);
+			Vector3d position = o.getRelativePositionAtUT(nodeUT);
+			double eangle = NodeTools.Angle360((Math.Atan2(prograde.y, prograde.x) - Math.Atan2(position.y, position.x)) * 180.0 / Math.PI);
 
 			// Correct to angle from retrograde if needed.
-			if(eangle < 270) {
-				eangle = 90 - eangle;
-				if(eangle < 0) {
-					eangle = (180 - Math.Abs(eangle)) * -1;
-				}
-			} else {
-				eangle = 450 - eangle;
+			if(eangle > 180) {
+				eangle = 180 - eangle;
 			}
 
 			return eangle;
