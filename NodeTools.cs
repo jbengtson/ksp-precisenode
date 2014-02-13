@@ -196,6 +196,7 @@ namespace RegexKSP {
 		/// <returns>The equatorial AN UT.</returns>
 		/// <param name="o">The Orbit to calculate the UT from.</param>
 		public static double getEquatorialANUT(Orbit o) {
+            //TODO: Add safeguards for bad UTs, may need to be refactored to NodeManager
 			return o.GetUTforTrueAnomaly(o.GetTrueAnomalyOfZupVector(o.GetANVector()), 2);
 		}
 
@@ -206,6 +207,7 @@ namespace RegexKSP {
 		/// <param name="a">The orbit to find the UT on.</param>
 		/// <param name="b">The target orbit.</param>
 		public static double getTargetANUT(Orbit a, Orbit b) {
+            //TODO: Add safeguards for bad UTs, may need to be refactored to NodeManager
 			Vector3d ANVector = Vector3d.Cross(b.h, a.GetOrbitNormal()).normalized;
 			return a.GetUTforTrueAnomaly(a.GetTrueAnomalyOfZupVector(ANVector), 2);
 		}
@@ -216,6 +218,7 @@ namespace RegexKSP {
 		/// <returns>The equatorial DN UT.</returns>
 		/// <param name="o">The Orbit to calculate the UT from.</param>
 		public static double getEquatorialDNUT(Orbit o) {
+            //TODO: Add safeguards for bad UTs, may need to be refactored to NodeManager
 			Vector3d DNVector = QuaternionD.AngleAxis(NodeTools.Angle360(o.LAN + 180), Planetarium.Zup.Z) * Planetarium.Zup.X;
 			return o.GetUTforTrueAnomaly(o.GetTrueAnomalyOfZupVector(DNVector), 2);
 		}
@@ -227,6 +230,7 @@ namespace RegexKSP {
 		/// <param name="a">The orbit to find the UT on.</param>
 		/// <param name="b">The target orbit.</param>
 		public static double getTargetDNUT(Orbit a, Orbit b) {
+            //TODO: Add safeguards for bad UTs, may need to be refactored to NodeManager
 			Vector3d DNVector = Vector3d.Cross(a.GetOrbitNormal(), b.h).normalized;
 			return a.GetUTforTrueAnomaly(a.GetTrueAnomalyOfZupVector(DNVector), 2);
 		}
@@ -314,6 +318,7 @@ namespace RegexKSP {
 		public bool showUTControls = false;
 		public bool showEAngle = true;
 		public bool showOrbitInfo = false;
+        public bool removeUsedNodes = false;
 
 		public KeyCode progInc = KeyCode.Keypad8;
 		public KeyCode progDec = KeyCode.Keypad5;
@@ -328,6 +333,7 @@ namespace RegexKSP {
 		public KeyCode hideWindow = KeyCode.P;
 		public KeyCode addWidget = KeyCode.O;
 		public double increment = 1.0;
+        public double usedNodeThreshold = 0.5;
 		public int conicsMode = 3;
 
 		public void downIncrement() {
@@ -528,6 +534,16 @@ namespace RegexKSP {
 		public double currentMagnitude() {
 			return curState.deltaV.magnitude;
 		}
+
+        public void setPeriapsis() {
+            //TODO: Add look-ahead functionality if the current periapsis is non-existant.
+            setUT(Planetarium.GetUniversalTime() + node.patch.timeToPe);
+        }
+
+        public void setApoapsis() {
+            //TODO: Add look-ahead functionality if the current apoapsis is non-existant.
+            setUT(Planetarium.GetUniversalTime() + node.patch.timeToAp);
+        }
 
 		public bool hasNode() {
 			if(node == null) { return false; }
