@@ -69,25 +69,38 @@ namespace RegexKSP {
 		/// Overridden function from MonoBehavior
 		/// </summary>
 		public void Update() {
-			if(canShowNodeEditor && !FlightDriver.Pause) {
-				PatchedConicSolver solver = NodeTools.getSolver();
-				if(solver.maneuverNodes.Count > 0) {
-					if(!curState.hasNode() || !solver.maneuverNodes.Contains(curState.node)) {
-						// get the first one if we can't find the current or it's null
-						curState = new NodeManager(solver.maneuverNodes[0]);
-					} else if(curState.hasNode()) {
-						curState.updateNode();
-						curState = curState.nextState();
-					}
-				} else {
-					if(curState.hasNode()) {
-						curState = new NodeManager();
-						curState.resizeClockWindow = true;
-					}
-				}
-				processKeyInput();
+			if(!FlightDriver.Pause && canShowNodeEditor) {
+                PatchedConicSolver solver = NodeTools.getSolver();
+                if(solver.maneuverNodes.Count > 0) {
+                    if(!curState.hasNode() || !solver.maneuverNodes.Contains(curState.node)) {
+                        // get the first one if we can't find the current or it's null
+                        curState = new NodeManager(solver.maneuverNodes[0]);
+                    } else if(curState.hasNode()) {
+                        curState.updateNode();
+                        curState = curState.nextState();
+                    }
+                } else {
+                    if(curState.hasNode()) {
+                        curState = new NodeManager();
+                        curState.resizeClockWindow = true;
+                    }
+                }
+                processKeyInput();
 			}
 		}
+
+        public void FixedUpdate() {
+            if(!FlightDriver.Pause) {
+                PatchedConicSolver p = NodeTools.getSolver();
+                if(options.removeUsedNodes && p.maneuverNodes.Count > 0) {
+                    ManeuverNode node = p.maneuverNodes[0];
+                    if(node.GetBurnVector(FlightGlobals.ActiveVessel.Orbit).magnitude < options.usedNodeThreshold) {
+                        solver.RemoveManeuverNode(node);
+                        //TODO: Clean up states after removing the node.
+                    }
+                }
+            }
+        }
 
 		/// <summary>
 		/// Overridden function from MonoBehavior
@@ -309,7 +322,7 @@ namespace RegexKSP {
 			// extended time controls
 			if(options.showUTControls) {
 				GUILayout.BeginHorizontal();
-				GUIParts.drawButton("Peri", Color.yellow, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToPe); });
+				GUIParts.drawButton("Peri", Color.yellow, delegate() { curState.setPeriapsis(); });
 				GUIParts.drawButton("DN", Color.magenta, delegate() {
 					Orbit targ = NodeTools.getTargetOrbit();
 					if(targ != null) {
@@ -328,7 +341,7 @@ namespace RegexKSP {
 						curState.setUT(NodeTools.getEquatorialANUT(curState.node.patch));
 					}
 				});
-				GUIParts.drawButton("Apo", Color.blue, delegate() { curState.setUT(Planetarium.GetUniversalTime() + curState.node.patch.timeToAp); });
+				GUIParts.drawButton("Apo", Color.blue, delegate() { curState.setApoapsis(); });
 				GUILayout.EndHorizontal();
 			}
 		}
@@ -489,6 +502,8 @@ namespace RegexKSP {
 				options.showOrbitInfo = temp;
 				curState.resizeMainWindow = true;
 			}
+			options.removeUsedNodes = GUILayout.Toggle(options.removeUsedNodes, "Remove Used Nodes");
+            //TODO: Add threshold controls for removing used nodes
 			GUILayout.EndVertical();
 			GUI.DragWindow();
 		}
@@ -814,6 +829,8 @@ namespace RegexKSP {
 					options.showOrbitInfo = config.GetValue<bool>("showOrbitInfo", false);
 					options.showUTControls = config.GetValue<bool>("showUTControls", false);
 					options.showManeuverPager = config.GetValue<bool>("showManeuverPager", true);
+					options.removeUsedNodes = config.GetValue<bool>("removeUsedNodes", false);
+					options.usedNodeThreshold = config.GetValue<double>("usedNodeThreshold", 0.5);
 
 					string temp = config.GetValue<String>("progInc", "Keypad8");
 					options.progInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
@@ -885,6 +902,8 @@ namespace RegexKSP {
 			config["showOrbitInfo"] = options.showOrbitInfo;
 			config["showUTControls"] = options.showUTControls;
 			config["showManeuverPager"] = options.showManeuverPager;
+			config["removeUsedNodes"] = options.removeUsedNodes;
+			config["usedNodeThreshold"] = options.usedNodeThreshold;
 
 			config.save();
 		}
