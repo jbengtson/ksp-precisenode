@@ -292,7 +292,7 @@ namespace RegexKSP {
 		private void drawTimeControls(Color contentColor) {
 			// Universal time controls
 			GUILayout.BeginHorizontal();
-			GUILayout.Label("UT:", GUILayout.Width(100));
+			GUILayout.Label((options.largeUTIncrement?"UT: (10x inc)":"UT:"), GUILayout.Width(100));
 			GUI.backgroundColor = Color.green;
 			if(!curState.timeParsed) {
 				GUI.contentColor = Color.red;
@@ -302,8 +302,9 @@ namespace RegexKSP {
 				curState.setUT(check);
 			}
 			GUI.contentColor = contentColor;
-			GUIParts.drawButton("-", Color.red, delegate() { curState.addUT(options.increment * -1.0); });
-			GUIParts.drawButton("+", Color.green, delegate() { curState.addUT(options.increment); });
+			double ut_increment = options.increment * (options.largeUTIncrement ? 10.0 : 1.0);
+			GUIParts.drawButton("-", Color.red, delegate() { curState.addUT(ut_increment * -1.0); });
+			GUIParts.drawButton("+", Color.green, delegate() { curState.addUT(ut_increment); });
 			GUILayout.EndHorizontal();
 
 			// extended time controls
@@ -318,8 +319,13 @@ namespace RegexKSP {
 						curState.setUT(NodeTools.getEquatorialDNUT(curState.node.patch));
 					}
 				});
-				GUIParts.drawButton("-1K", Color.red, delegate() { curState.addUT(-1000); });
-				GUIParts.drawButton("+1K", Color.green, delegate() { curState.addUT(1000); });
+				if (options.largeUTIncrement) {
+					GUIParts.drawButton("-Orb", Color.red, delegate() { curState.addUT(-curState.node.patch.period); });
+					GUIParts.drawButton("+Orb", Color.green, delegate() { curState.addUT(curState.node.patch.period); });
+				} else {
+					GUIParts.drawButton("-1K", Color.red, delegate() { curState.addUT(-1000); });
+					GUIParts.drawButton("+1K", Color.green, delegate() { curState.addUT(1000); });
+				}
 				GUIParts.drawButton("AN", Color.cyan, delegate() {
 					Orbit targ = NodeTools.getTargetOrbit();
 					if(targ != null) {
@@ -479,6 +485,7 @@ namespace RegexKSP {
 				options.showUTControls = temp;
 				curState.resizeMainWindow = true;
 			}
+			options.largeUTIncrement = GUILayout.Toggle(options.largeUTIncrement, "Use 10x UT increment");
 			temp = GUILayout.Toggle(options.showEAngle, "Show Ejection Angle");
 			if(temp != options.showEAngle) {
 				options.showEAngle = temp;
@@ -764,11 +771,11 @@ namespace RegexKSP {
 			}
 			// UT increment
 			if(Input.GetKeyDown(options.timeInc)) {
-				curState.addUT(options.increment);
+				curState.addUT(options.increment * (options.largeUTIncrement ? 10.0 : 1.0));
 			}
 			// UT decrement
 			if(Input.GetKeyDown(options.timeDec)) {
-				curState.addUT(options.increment * -1.0);
+				curState.addUT(options.increment * (options.largeUTIncrement ? -10.0 : -1.0));
 			}
 			// Page Conics
 			if(Input.GetKeyDown(options.pageConics)) {
@@ -814,6 +821,7 @@ namespace RegexKSP {
 					options.showOrbitInfo = config.GetValue<bool>("showOrbitInfo", false);
 					options.showUTControls = config.GetValue<bool>("showUTControls", false);
 					options.showManeuverPager = config.GetValue<bool>("showManeuverPager", true);
+					options.largeUTIncrement = config.GetValue<bool>("largeUTIncrement", false);
 
 					string temp = config.GetValue<String>("progInc", "Keypad8");
 					options.progInc = (KeyCode)Enum.Parse(typeof(KeyCode), temp);
@@ -885,6 +893,7 @@ namespace RegexKSP {
 			config["showOrbitInfo"] = options.showOrbitInfo;
 			config["showUTControls"] = options.showUTControls;
 			config["showManeuverPager"] = options.showManeuverPager;
+			config["largeUTIncrement"] = options.largeUTIncrement;
 
 			config.save();
 		}

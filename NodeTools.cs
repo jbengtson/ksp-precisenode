@@ -320,6 +320,8 @@ namespace RegexKSP {
 		public bool showEAngle = true;
 		public bool showOrbitInfo = false;
 
+		public bool largeUTIncrement = false;
+
 		public KeyCode progInc = KeyCode.Keypad8;
 		public KeyCode progDec = KeyCode.Keypad5;
 		public KeyCode normInc = KeyCode.Keypad9;
