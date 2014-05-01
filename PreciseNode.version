@@ -1,0 +1,13 @@
+{
+  "NAME": "PreciseNode",
+  "URL": "https://raw.githubusercontent.com/jbengtson/ksp-precisenode/master/PreciseNode.version",
+  "VERSION": {
+    "MAJOR": 0,
+    "MINOR": 9
+  },
+  "KSP_VERSION": {
+    "MAJOR": 0,
+    "MINOR": 23,
+    "PATCH": 5
+  }
+}
